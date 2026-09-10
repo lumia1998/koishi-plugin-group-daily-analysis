@@ -11,6 +11,7 @@ import { generateImage, imageMime, isPublicIPv4 } from '../src/service/image'
 import { LLMService } from '../src/service/llm'
 import { apply, todayWindow } from '../src/plugins/comic'
 import { listModels } from '../src/models'
+import { createTrace, errorKind } from '../src/diagnostics'
 
 const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
@@ -28,6 +29,46 @@ test('schema supplies nested API and disabled-comic defaults', () => {
     assert.equal(config.llm.timeout, 120)
     assert.equal(config.comic.enabled, false)
     assert.equal(config.comic.maxTopics, 3)
+    assert.equal(config.debug, false)
+})
+
+test('detailed logging is opt-in and API traces omit secrets and bodies', async (t) => {
+    const logs: string[] = []
+    const ctx = {
+        logger: { info: (message: string) => logs.push(message) }
+    } as any
+    createTrace(ctx, false, 'test')('hidden')
+    assert.deepEqual(logs, [])
+    const trace = createTrace(ctx, true, 'test')
+    t.mock.method(globalThis, 'fetch', async () =>
+        json({ content: 'private-response' })
+    )
+    await requestJson(
+        base + '?key=private-url',
+        'private-key',
+        { prompt: 'private-prompt' },
+        1,
+        {},
+        undefined,
+        trace
+    )
+    assert.ok(logs.some((line) => line.includes('200')))
+    assert.ok(!logs.join('').includes('private-'))
+    t.mock.restoreAll()
+    t.mock.method(
+        globalThis,
+        'fetch',
+        async () => new Response('private-error', { status: 401 })
+    )
+    await assert.rejects(
+        requestJson(base, 'private-key', {}, 1, {}, undefined, trace)
+    )
+    assert.ok(logs.some((line) => line.includes('HTTP 401')))
+    assert.ok(!logs.join('').includes('private-'))
+    assert.equal(
+        errorKind(new Error('private-error')),
+        'RequestOrProcessingError'
+    )
 })
 
 test('endpoint accepts root, version and full paths without duplicating versions', () => {

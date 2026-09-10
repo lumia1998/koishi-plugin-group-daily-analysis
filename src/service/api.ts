@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { Trace, errorKind } from '../diagnostics'
 export type TextProtocol =
     'openai-responses' | 'anthropic-messages' | 'google-v1beta' | 'openai-chat'
 
@@ -64,13 +65,16 @@ export async function requestJson(
     body: unknown,
     timeout: number,
     headers: Record<string, string> = {},
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: Trace
 ): Promise<any> {
     const controller = new AbortController()
     const abort = () => controller.abort()
     if (signal?.aborted) controller.abort()
     signal?.addEventListener('abort', abort, { once: true })
     const timer = setTimeout(abort, timeout * 1000)
+    const started = Date.now()
+    trace?.('JSON 请求开始', { timeoutSeconds: timeout })
     try {
         const response = await fetch(url, {
             method: 'POST',
@@ -86,8 +90,18 @@ export async function requestJson(
             },
             body: JSON.stringify(body)
         })
+        trace?.('HTTP 响应', {
+            status: response.status,
+            elapsedMs: Date.now() - started
+        })
         return await readJson(response)
     } catch (error) {
+        trace?.('JSON 请求失败', {
+            reason: controller.signal.aborted
+                ? 'TimeoutOrCancelled'
+                : errorKind(error),
+            elapsedMs: Date.now() - started
+        })
         if (controller.signal.aborted) throw new Error('API 请求超时或已取消。')
         // Do not propagate fetch errors containing URLs or provider response bodies.
         if (error instanceof Error && error.message.startsWith('API 请求失败'))

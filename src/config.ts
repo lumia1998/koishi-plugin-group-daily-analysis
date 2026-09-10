@@ -74,6 +74,11 @@ export interface Config {
 
 export const Config: Schema<Config> = Schema.intersect([
     Schema.object({
+        debug: Schema.boolean()
+            .default(false)
+            .description(
+                '详细日志开关。开启后记录模型列表、文本 API、漫画各阶段、HTTP 状态与耗时，可在 Koishi 日志中查看；不记录密钥、聊天正文、提示词或图片内容。'
+            ),
         enableAllGroupsByDefault: Schema.boolean()
             .default(false)
             .description(

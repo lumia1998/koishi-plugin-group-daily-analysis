@@ -6,6 +6,7 @@ import { isIP } from 'node:net'
 import { get } from 'node:https'
 import { Config } from '../config'
 import { endpoint, readJson, requestJson } from './api'
+import { Trace, errorKind } from '../diagnostics'
 
 const MAX_IMAGE = 20 * 1024 * 1024
 
@@ -125,13 +126,22 @@ export async function generateImage(
     config: Config['comic'],
     prompt: string,
     reference?: Buffer,
-    parentSignal?: AbortSignal
+    parentSignal?: AbortSignal,
+    trace?: Trace
 ): Promise<Buffer> {
     const controller = new AbortController()
     const abort = () => controller.abort()
     if (parentSignal?.aborted) abort()
     parentSignal?.addEventListener('abort', abort, { once: true })
     const timer = setTimeout(abort, config.timeout * 1000)
+    const started = Date.now()
+    trace?.('生图请求开始', {
+        protocol: config.protocol,
+        model: config.model,
+        referenceBytes: reference?.length ?? 0,
+        promptChars: prompt.length,
+        timeoutSeconds: config.timeout
+    })
     try {
         let item: any
         if (config.protocol === 'google-v1beta') {
@@ -158,7 +168,8 @@ export async function generateImage(
                 },
                 config.timeout,
                 { 'x-goog-api-key': config.apiKey },
-                controller.signal
+                controller.signal,
+                trace
             )
             const image = data.candidates?.[0]?.content?.parts?.find(
                 (part: any) => part.inlineData?.data || part.inline_data?.data
@@ -193,6 +204,10 @@ export async function generateImage(
                     redirect: 'error',
                     headers: { Authorization: `Bearer ${config.apiKey}` }
                 })
+                trace?.('图片编辑 HTTP 响应', {
+                    status: response.status,
+                    elapsedMs: Date.now() - started
+                })
                 item = (await readJson(response)).data?.[0]
             } else {
                 const data = await requestJson(
@@ -201,12 +216,29 @@ export async function generateImage(
                     { model: config.model, prompt, size: config.size, n: 1 },
                     config.timeout,
                     {},
-                    controller.signal
+                    controller.signal,
+                    trace
                 )
                 item = data.data?.[0]
             }
         } else throw new Error('不支持的生图协议。')
-        return await decodeImage(item, controller.signal)
+        trace?.('读取图片', {
+            source: typeof item?.b64_json === 'string' ? 'base64' : 'url'
+        })
+        const image = await decodeImage(item, controller.signal)
+        trace?.('生图完成', {
+            bytes: image.length,
+            elapsedMs: Date.now() - started
+        })
+        return image
+    } catch (error) {
+        trace?.('生图失败', {
+            reason: controller.signal.aborted
+                ? 'TimeoutOrCancelled'
+                : errorKind(error),
+            elapsedMs: Date.now() - started
+        })
+        throw error
     } finally {
         clearTimeout(timer)
         parentSignal?.removeEventListener('abort', abort)

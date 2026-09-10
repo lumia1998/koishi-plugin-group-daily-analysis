@@ -11,6 +11,7 @@ import {
 } from '../types'
 import { extractText, requestJson, textRequest } from './api'
 import { load } from 'js-yaml'
+import { createTrace } from '../diagnostics'
 
 export class LLMService extends Service {
     constructor(
@@ -30,7 +31,13 @@ export class LLMService extends Service {
         if (!api?.baseUrl || !model)
             throw new Error('请配置自定义 LLM API 地址和模型。')
         const request = textRequest(api, model, prompt, this.config.temperature)
-        return extractText(
+        const trace = createTrace(this.ctx, !!this.config.debug, '文本 API')
+        trace('开始生成', {
+            protocol: api.protocol,
+            model,
+            inputChars: prompt.length
+        })
+        const text = extractText(
             api.protocol,
             await requestJson(
                 request.url,
@@ -38,9 +45,12 @@ export class LLMService extends Service {
                 request.body,
                 api.timeout,
                 request.headers,
-                signal
+                signal,
+                trace
             )
         )
+        trace('生成完成', { outputChars: text.length })
+        return text
     }
 
     private async _callLLM<T>(

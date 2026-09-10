@@ -1,6 +1,7 @@
 import { Context, Schema } from 'koishi'
 import { Config } from './config'
 import { endpoint, readJson } from './service/api'
+import { createTrace, errorKind, Trace } from './diagnostics'
 
 type ModelApi =
     | Pick<Config['comic'], 'protocol' | 'baseUrl' | 'apiKey' | 'timeout'>
@@ -8,7 +9,8 @@ type ModelApi =
 
 export async function listModels(
     config: ModelApi,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    trace?: Trace
 ): Promise<string[]> {
     const google = config.protocol === 'google-v1beta'
     const url = new URL(
@@ -34,6 +36,10 @@ export async function listModels(
                 headers,
                 signal: controller.signal,
                 redirect: 'error'
+            })
+            trace?.('模型列表 HTTP 响应', {
+                page: page + 1,
+                status: response.status
             })
             const data = await readJson(response)
             const models = google ? data.models : data.data
@@ -64,10 +70,17 @@ export function registerModelLists(ctx: Context, config: Config) {
     const controller = new AbortController()
     ctx.on('dispose', () => controller.abort())
     const update = async (api: ModelApi, key: string, label: string) => {
+        const trace = createTrace(ctx, !!config.debug, `${label}模型列表`)
         ctx.schema.set(key, Schema.string())
         if (!api.baseUrl?.trim()) return
         try {
-            const ids = await listModels(api, controller.signal)
+            const started = Date.now()
+            trace('获取开始', { protocol: api.protocol })
+            const ids = await listModels(api, controller.signal, trace)
+            trace('获取完成', {
+                count: ids.length,
+                elapsedMs: Date.now() - started
+            })
             if (controller.signal.aborted) return
             ctx.schema.set(
                 key,
@@ -76,7 +89,8 @@ export function registerModelLists(ctx: Context, config: Config) {
                     Schema.string().description('手动输入模型 ID')
                 ])
             )
-        } catch {
+        } catch (error) {
+            trace('获取失败', { reason: errorKind(error) })
             if (!controller.signal.aborted)
                 ctx.logger.warn(
                     `${label}模型列表获取失败，请检查地址、密钥及模型列表接口；仍可手动填写模型 ID。`
