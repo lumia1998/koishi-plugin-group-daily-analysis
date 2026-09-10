@@ -7,7 +7,6 @@ import { MessageService } from './service/message'
 import { plugin } from './plugin'
 import type {} from 'koishi-plugin-puppeteer'
 import type { Config as GroupAnalysisConfig } from './config'
-import { modelSchema } from 'koishi-plugin-chatluna/utils/schema'
 import { cron } from './cron'
 
 export * from './config'
@@ -33,8 +32,6 @@ export function apply(ctx: Context, config: GroupAnalysisConfig) {
     ctx.inject(['chatluna_group_analysis'], (ctx) => {
         ctx.effect(() => scheduleAutoAnalysis(ctx, config))
     })
-
-    modelSchema(ctx)
 }
 
 function scheduleAutoAnalysis(ctx: Context, config: GroupAnalysisConfig) {

@@ -1,0 +1,376 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { Config } from '../src/config'
+import {
+    endpoint,
+    extractText,
+    requestJson,
+    textRequest
+} from '../src/service/api'
+import { generateImage, imageMime, isPublicIPv4 } from '../src/service/image'
+import { LLMService } from '../src/service/llm'
+import { apply } from '../src/plugins/comic'
+
+const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
+    'base64'
+)
+const base = 'https://provider.example'
+const json = (data: unknown) =>
+    new Response(JSON.stringify(data), {
+        headers: { 'content-type': 'application/json' }
+    })
+
+test('schema supplies nested API and disabled-comic defaults', () => {
+    const config = Config({})
+    assert.equal(config.llm.protocol, 'openai-responses')
+    assert.equal(config.llm.timeout, 120)
+    assert.equal(config.comic.enabled, false)
+    assert.equal(config.comic.maxTopics, 3)
+})
+
+test('endpoint accepts root, version and full paths without duplicating versions', () => {
+    for (const input of [
+        base,
+        base + '/v1',
+        base + '/v1/',
+        base + '/v1/responses'
+    ]) {
+        assert.equal(endpoint(input, '/v1/responses'), base + '/v1/responses')
+    }
+    assert.equal(
+        endpoint(base + '/v1beta', '/v1beta/models/test:generateContent'),
+        base + '/v1beta/models/test:generateContent'
+    )
+    assert.throws(() => endpoint('file:///tmp', '/v1/responses'))
+    assert.throws(() => endpoint('https://user:secret@host', '/v1/responses'))
+})
+
+test('all text protocols send and extract their native wire formats', async (t) => {
+    const config = Config({}).llm
+    config.baseUrl = base
+    config.apiKey = 'test-key'
+    const cases = [
+        [
+            'openai-responses',
+            '/v1/responses',
+            {
+                output: [
+                    {
+                        type: 'message',
+                        content: [{ type: 'output_text', text: 'hello' }]
+                    }
+                ]
+            }
+        ],
+        [
+            'anthropic-messages',
+            '/v1/messages',
+            {
+                content: [
+                    { type: 'thinking', thinking: 'hidden' },
+                    { type: 'text', text: 'hello' }
+                ]
+            }
+        ],
+        [
+            'google-v1beta',
+            '/v1beta/models/model:generateContent',
+            {
+                candidates: [
+                    {
+                        finishReason: 'STOP',
+                        content: {
+                            parts: [
+                                { thought: true, text: 'hidden' },
+                                { text: 'hello' }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ],
+        [
+            'openai-chat',
+            '/v1/chat/completions',
+            {
+                choices: [
+                    { finish_reason: 'stop', message: { content: 'hello' } }
+                ]
+            }
+        ]
+    ] as const
+    for (const [protocol, path, response] of cases) {
+        config.protocol = protocol
+        const request = textRequest(config, 'model', 'prompt', 1)
+        assert.equal(request.url, base + path)
+        t.mock.method(globalThis, 'fetch', async (_url, init) => {
+            const headers = new Headers(init?.headers)
+            if (
+                protocol === 'anthropic-messages' ||
+                protocol === 'google-v1beta'
+            )
+                assert.equal(headers.has('Authorization'), false)
+            else assert.equal(headers.get('Authorization'), 'Bearer test-key')
+            const body = JSON.parse(init!.body as string)
+            if (protocol === 'openai-responses') {
+                assert.equal(body.input, 'prompt')
+                assert.equal(body.store, false)
+            }
+            if (protocol === 'anthropic-messages') {
+                assert.equal(body.max_tokens, 8192)
+                assert.equal(headers.get('x-api-key'), 'test-key')
+            }
+            if (protocol === 'google-v1beta')
+                assert.equal(body.contents[0].parts[0].text, 'prompt')
+            return json(response)
+        })
+        assert.equal(
+            extractText(
+                protocol,
+                await requestJson(
+                    request.url,
+                    config.apiKey,
+                    request.body,
+                    1,
+                    request.headers
+                )
+            ),
+            'hello'
+        )
+        t.mock.restoreAll()
+    }
+})
+
+test('refused, truncated, failed, malformed and canceled responses fail safely', async (t) => {
+    assert.throws(() =>
+        extractText('openai-responses', { status: 'incomplete' })
+    )
+    assert.throws(() =>
+        extractText('anthropic-messages', { stop_reason: 'max_tokens' })
+    )
+    assert.throws(() =>
+        extractText('google-v1beta', {
+            candidates: [{ finishReason: 'SAFETY' }]
+        })
+    )
+    assert.throws(() =>
+        extractText('openai-chat', { choices: [{ finish_reason: 'length' }] })
+    )
+    assert.throws(() =>
+        extractText('openai-responses', {
+            output: [{ type: 'message', content: [{ type: 'refusal' }] }]
+        })
+    )
+    t.mock.method(
+        globalThis,
+        'fetch',
+        async () => new Response('secret provider error', { status: 401 })
+    )
+    await assert.rejects(
+        requestJson(base, 'secret', {}, 1),
+        /^Error: API 请求失败（HTTP 401）。$/
+    )
+    t.mock.restoreAll()
+    t.mock.method(
+        globalThis,
+        'fetch',
+        async () => new Response('not json secret')
+    )
+    await assert.rejects(
+        requestJson(base, 'secret', {}, 1),
+        /^Error: API 网络请求或响应解析失败。$/
+    )
+    t.mock.restoreAll()
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        init!.signal!.throwIfAborted()
+        return json({})
+    })
+    const controller = new AbortController()
+    controller.abort()
+    await assert.rejects(
+        requestJson(base, '', {}, 1, {}, controller.signal),
+        /已取消/
+    )
+})
+
+test('Google reference is inlineData; OpenAI reference is multipart edits', async (t) => {
+    const config = Config({}).comic
+    Object.assign(config, {
+        baseUrl: base,
+        apiKey: 'key',
+        model: 'image-model'
+    })
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        if (config.protocol === 'google-v1beta') {
+            const body = JSON.parse(init!.body as string)
+            assert.equal(
+                body.contents[0].parts[1].inlineData.data,
+                png.toString('base64')
+            )
+            assert.equal(new Headers(init!.headers).has('Authorization'), false)
+            return json({
+                candidates: [
+                    {
+                        content: {
+                            parts: [
+                                { inlineData: { data: png.toString('base64') } }
+                            ]
+                        }
+                    }
+                ]
+            })
+        }
+        assert.equal(url, base + '/v1/images/edits')
+        const form = init!.body as FormData
+        assert.equal(form.get('prompt'), 'storyboard')
+        assert.deepEqual(
+            Buffer.from(await (form.get('image') as Blob).arrayBuffer()),
+            png
+        )
+        return json({ data: [{ b64_json: png.toString('base64') }] })
+    })
+    assert.deepEqual(await generateImage(config, 'storyboard', png), png)
+    config.protocol = 'openai-images'
+    assert.deepEqual(await generateImage(config, 'storyboard', png), png)
+    t.mock.restoreAll()
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        assert.equal(url, base + '/v1/images/generations')
+        assert.equal(JSON.parse(init!.body as string).n, 1)
+        return json({ data: [{ b64_json: png.toString('base64') }] })
+    })
+    assert.deepEqual(await generateImage(config, 'storyboard'), png)
+})
+
+test('rejects special IPs and non-image output', () => {
+    for (const ip of [
+        '127.0.0.1',
+        '10.0.0.1',
+        '172.16.0.1',
+        '192.168.1.1',
+        '169.254.169.254',
+        '100.64.0.1',
+        '198.18.0.1',
+        '224.0.0.1',
+        '::1'
+    ])
+        assert.equal(isPublicIPv4(ip), false, ip)
+    assert.equal(isPublicIPv4('8.8.8.8'), true)
+    assert.equal(imageMime(png), 'image/png')
+    assert.throws(() => imageMime(Buffer.from('<html>error</html>')))
+})
+
+test('LLM service parses plain JSON and fenced YAML without ChatLuna', async (t) => {
+    const config = Config({ model: 'model', llm: { baseUrl: base } })
+    const service = Object.assign(Object.create(LLMService.prototype), {
+        config
+    }) as LLMService
+    for (const output of [
+        '[{"topic":"test"}]',
+        '```yaml\n- topic: test\n```'
+    ]) {
+        t.mock.method(globalThis, 'fetch', async () =>
+            json({
+                output: [
+                    {
+                        type: 'message',
+                        content: [{ type: 'output_text', text: output }]
+                    }
+                ]
+            })
+        )
+        assert.deepEqual(await service.summarizeTopics('messages'), [
+            { topic: 'test' }
+        ])
+        t.mock.restoreAll()
+    }
+})
+
+test('comic pipeline passes topics to storyboard, enforces cooldown and group guards', async (t) => {
+    const config = Config({
+        enableAllGroupsByDefault: true,
+        comic: { enabled: true, baseUrl: base, model: 'image-model' }
+    })
+    let action: any
+    let calls = 0
+    const sent: unknown[] = []
+    const session = {
+        platform: 'onebot',
+        selfId: 'bot',
+        guildId: 'group',
+        channelId: 'group',
+        isDirect: false,
+        send: async (value: unknown) => sent.push(value)
+    }
+    const ctx = {
+        baseDir: process.cwd(),
+        on() {},
+        command() {
+            return {
+                alias() {
+                    return this
+                },
+                action(fn: any) {
+                    action = fn
+                }
+            }
+        },
+        chatluna_group_analysis_message: {
+            async getHistoricalMessages() {
+                return Array.from({ length: 100 }, () => ({
+                    userId: 'user',
+                    username: 'User',
+                    content: 'hello',
+                    timestamp: new Date()
+                }))
+            }
+        },
+        chatluna_group_analysis_llm: {
+            async summarizeTopics(text: string) {
+                assert.equal(typeof text, 'string')
+                return [{ topic: 'test', detail: 'topic details' }]
+            },
+            async generateText(prompt: string) {
+                assert.ok(prompt.includes('topic details'))
+                return 'storyboard'
+            }
+        }
+    }
+    t.mock.method(globalThis, 'fetch', async () => {
+        calls++
+        return json({
+            candidates: [
+                {
+                    content: {
+                        parts: [
+                            { inlineData: { data: png.toString('base64') } }
+                        ]
+                    }
+                }
+            ]
+        })
+    })
+    apply(ctx as any, config)
+    assert.match(
+        await action({ session: { ...session, isDirect: true } }),
+        /群聊/
+    )
+    assert.match(await action({ session }, 8), /1 到 7/)
+    const first = action({ session }, 1)
+    assert.match(await action({ session }, 1), /正在生成/)
+    await first
+    assert.equal(sent.length, 2)
+    assert.equal(calls, 1)
+    assert.match(await action({ session }, 1), /冷却/)
+    assert.equal(calls, 1)
+    t.mock.restoreAll()
+    t.mock.method(globalThis, 'fetch', async () => {
+        calls++
+        return new Response('upstream failed', { status: 503 })
+    })
+    const other = { ...session, channelId: 'other' }
+    assert.match(await action({ session: other }, 1), /失败/)
+    assert.equal(calls, 2)
+    assert.match(await action({ session: other }, 1), /冷却/)
+    assert.equal(calls, 2)
+})

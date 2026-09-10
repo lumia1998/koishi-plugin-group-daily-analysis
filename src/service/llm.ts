@@ -9,16 +9,10 @@ import {
     UserStats,
     UserTitle
 } from '../types'
-import { ComputedRef } from 'koishi-plugin-chatluna'
-import { ChatLunaChatModel } from 'koishi-plugin-chatluna/llm-core/platform/model'
-import { getMessageContent } from 'koishi-plugin-chatluna/utils/string'
+import { extractText, requestJson, textRequest } from './api'
 import { load } from 'js-yaml'
 
 export class LLMService extends Service {
-    static readonly inject = ['chatluna']
-
-    private models = new Map<string, ComputedRef<ChatLunaChatModel>>()
-
     constructor(
         ctx: Context,
         public config: Config
@@ -26,66 +20,43 @@ export class LLMService extends Service {
         super(ctx, 'chatluna_group_analysis_llm', true)
     }
 
-    private async loadModel(modelName: string) {
-        const existing = this.models.get(modelName)
-        if (existing) return existing
-
-        const modelRef = await this.ctx.chatluna.createChatModel(modelName)
-        this.models.set(modelName, modelRef)
-        return modelRef
+    public async generateText(
+        prompt: string,
+        modelName?: string,
+        signal?: AbortSignal
+    ): Promise<string> {
+        const model = modelName || this.config.model
+        const api = this.config.llm
+        if (!api?.baseUrl || !model)
+            throw new Error('请配置自定义 LLM API 地址和模型。')
+        const request = textRequest(api, model, prompt, this.config.temperature)
+        return extractText(
+            api.protocol,
+            await requestJson(
+                request.url,
+                api.apiKey,
+                request.body,
+                api.timeout,
+                request.headers,
+                signal
+            )
+        )
     }
 
     private async _callLLM<T>(
         prompt: string,
         taskName: string,
-        modelName?: string
+        modelName?: string,
+        signal?: AbortSignal
     ): Promise<T> {
-        const selectedModelName = modelName || this.config.model
-        const modelRef = await this.loadModel(selectedModelName)
-
-        const model = modelRef.value
-        const logger = this.ctx.logger
-
-        if (!model) {
-            logger.warn(
-                `未找到 ChatLuna 模型 ${selectedModelName}，请检查配置。`
-            )
-
-            return null
-        }
-
-        return await model.caller.call(async () => {
-            logger.info(`正在调用 ChatLuna 模型进行 ${taskName}...`)
-            const response = await model.invoke(prompt, {
-                temperature: this.config.temperature ?? 1
-            })
-
-            const rawContent = getMessageContent(response.content)
-
-            logger.info(`LLM 原始响应: ${rawContent || '[空响应]'}`)
-
-            // Extract YAML from markdown code block (supports both yaml and yml)
-            const yamlMatch = rawContent.match(/```ya?ml\s*([\s\S]*?)\s*```/)
-            if (!yamlMatch) {
-                logger.warn(`未找到 YAML 代码块，无法解析。`)
-                throw new Error('未找到 YAML 响应。')
-            }
-
-            try {
-                const data = load(yamlMatch[1]) as T
-                if (Array.isArray(data)) {
-                    logger.info(`成功解析 ${data.length} 条数据。`)
-                }
-                return data
-            } catch (err) {
-                logger.error('解析 YAML 失败:', err)
-                logger.error(
-                    '待解析的 YAML 字符串:',
-                    yamlMatch[1] || '[空字符串]'
-                )
-                throw err
-            }
-        })
+        const text = await this.generateText(prompt, modelName, signal)
+        const fenced = text.match(
+            /\x60\x60\x60(?:json|ya?ml)\s*([\s\S]*?)\x60\x60\x60/i
+        )
+        const data = load(fenced ? fenced[1] : text)
+        if (!data || typeof data !== 'object')
+            throw new Error(taskName + '未返回有效的 JSON/YAML 结构。')
+        return data as T
     }
 
     private async _callText(
@@ -93,30 +64,7 @@ export class LLMService extends Service {
         taskName: string,
         modelName?: string
     ): Promise<string> {
-        const selectedModelName = modelName || this.config.model
-        const modelRef = await this.loadModel(selectedModelName)
-
-        const model = modelRef.value
-        const logger = this.ctx.logger
-
-        if (!model) {
-            logger.warn(
-                `未找到 ChatLuna 模型 ${selectedModelName}，请检查配置。`
-            )
-            return null
-        }
-
-        return await model.caller.call(async () => {
-            logger.info(`正在调用 ChatLuna 模型进行 ${taskName}...`)
-            const response = await model.invoke(prompt, {
-                temperature: this.config.temperature ?? 1
-            })
-
-            const rawContent = getMessageContent(response.content)
-
-            logger.info(`LLM 原始响应: ${rawContent || '[空响应]'}`)
-            return rawContent
-        })
+        return this.generateText(prompt, modelName)
     }
 
     private formatTimeRange(context?: AnalysisPromptContext): string {
@@ -156,7 +104,8 @@ export class LLMService extends Service {
 
     public async summarizeTopics(
         messagesText: string,
-        context?: AnalysisPromptContext
+        context?: AnalysisPromptContext,
+        signal?: AbortSignal
     ): Promise<SummaryTopic[]> {
         const prompt = this.fillAnalysisPrompt(
             this.config.promptTopic
@@ -164,9 +113,12 @@ export class LLMService extends Service {
                 .replace('{maxTopics}', this.config.maxTopics.toString()),
             context
         )
-        return this._callLLM<SummaryTopic[]>(prompt, '话题分析').then(
-            (data) => data ?? []
-        )
+        return this._callLLM<SummaryTopic[]>(
+            prompt,
+            '话题分析',
+            undefined,
+            signal
+        ).then((data) => data ?? [])
     }
 
     public async analyzeUserTitles(
