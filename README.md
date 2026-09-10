@@ -1,10 +1,10 @@
 <div align="center">
 
-# koishi-plugin-group-analysis
+# koishi-plugin-group-daily-analysis
 
 _Koishi 群聊分析插件_
 
-## [![npm](https://img.shields.io/npm/v/koishi-plugin-group-analysis/alpha)](https://www.npmjs.com/package/koishi-plugin-group-analysis) ![node version](https://img.shields.io/badge/node-%3E=18-green)
+## [![npm](https://img.shields.io/npm/v/koishi-plugin-group-daily-analysis/alpha)](https://www.npmjs.com/package/koishi-plugin-group-daily-analysis) ![node version](https://img.shields.io/badge/node-%3E=18-green)
 
 </div>
 
@@ -30,7 +30,7 @@ _Koishi 群聊分析插件_
 
 ## 部署
 
-安装预发布版：`npm install koishi-plugin-group-analysis@alpha`，在 Koishi 中启用 `group-analysis`。不要与 `chatluna-group-analysis` 同时启用，以免服务和命令重复注册。
+安装预发布版：`npm install koishi-plugin-group-daily-analysis@alpha`，在 Koishi 中启用 `group-analysis`。不要与 `chatluna-group-analysis` 同时启用，以免服务和命令重复注册。
 
 **插件依赖 Puppeteer 和 ChatLuna，请确保已安装并配置了 koishi-plugin-puppeteer 和 koishi-plugin-chatluna 插件。**
 
