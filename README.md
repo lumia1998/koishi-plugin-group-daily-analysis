@@ -79,5 +79,5 @@ _Koishi 群聊分析插件_
 
 ## 感谢
 
-- [lumia1998/koishi-plugin-group-analysis](https://github.com/lumia1998/koishi-plugin-group-analysis) Fork 的原始项目
+- [lumia1998/koishi-plugin-group-daily-analysis](https://github.com/lumia1998/koishi-plugin-group-daily-analysis) 本项目仓库
 - [SXP-Simon/astrbot-qq-group-daily-analysis](https://github.com/SXP-Simon/astrbot-qq-group-daily-analysis) AstrBot 的原始项目灵感来源，部分代码参考。
