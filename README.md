@@ -9,7 +9,7 @@ _Koishi 群聊分析插件_
 </div>
 
 > 本版基于 [ChatLunaLab/chatluna-group-analysis](https://github.com/ChatLunaLab/chatluna-group-analysis) 改造；其源自 lumia1998 的群分析插件。保留原作者贡献与 AGPL-3.0 许可。
-> `0.0.1-alpha.1` 为自定义 API 与群漫画的预发布版本。
+> `0.0.1-alpha.2` 为自定义 API 与群漫画的预发布版本。
 
 一个为 Koishi 设计的群聊分析插件，灵感来源于 `astrbot-qq-group-daily-analysis`，支持多维度统计和智能话题总结。
 
@@ -38,7 +38,7 @@ _Koishi 群聊分析插件_
 
 ### 从旧配置迁移
 
-在插件配置中填写 `llm.protocol`、`llm.baseUrl`、`llm.apiKey`，将 `model` 和可选的 `smallModel` 改成供应商的实际模型 ID，不再填写 ChatLuna 的平台/模型选择器值。两种模型共用同一个 LLM 接口配置。缺少 API 配置时不会回退 ChatLuna。
+在插件配置中填写 `llm.protocol`、`llm.baseUrl`、`llm.apiKey` 和 `llm.model`，填写供应商的实际模型 ID，不再填写 ChatLuna 的平台/模型选择器值。插件只需要两个模型：一个 `llm.model` 负责文本分析、查询和漫画分镜；一个 `comic.model` 负责生图。缺少 API 配置时不会回退 ChatLuna。
 
 | `llm.protocol` | 请求接口 |
 | --- | --- |
@@ -47,7 +47,7 @@ _Koishi 群聊分析插件_
 | `google-v1beta` | `/v1beta/models/{model}:generateContent` |
 | `openai-chat` | `/v1/chat/completions` |
 
-`baseUrl` 推荐填写 API 根地址或带版本的地址（例如 `https://your-provider.example/v1`）。也可填完整接口；Google 完整接口中的模型固定，不适合同时配置 `smallModel`。`llm.timeout` 默认 120 秒，`llm.maxOutputTokens` 默认 8192。Responses 和 Messages 不发送温度参数，以兼容限制温度的模型；其余文本协议使用 `temperature`。
+`baseUrl` 推荐填写 API 根地址或带版本的地址（例如 `https://your-provider.example/v1`）。也可填完整接口。`llm.timeout` 默认 120 秒，`llm.maxOutputTokens` 默认 8192。Responses 和 Messages 不发送温度参数，以兼容限制温度的模型；其余文本协议使用 `temperature`。
 
 ### 配置角色三视图漫画
 

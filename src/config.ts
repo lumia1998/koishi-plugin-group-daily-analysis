@@ -37,8 +37,6 @@ export interface Config {
     wordsFilter: string[]
     userFilter: string[]
     personaUserFilter: string[]
-    model: string
-    smallModel?: string
     alwaysPersistMessages: boolean
     retentionDays: number
     promptTopic: string
@@ -183,12 +181,6 @@ export const Config: Schema<Config> = Schema.intersect([
             .default('md3')
     }).description('分析渲染设置'),
     Schema.object({
-        model: Schema.string().description(
-            '自定义 API 的模型 ID，需要重新填写，不使用 ChatLuna 模型选择器。'
-        ),
-        smallModel: Schema.string().description(
-            '用于请求解析的小模型（未设置则使用默认模型）。'
-        ),
         temperature: Schema.number()
             .description('生成的温度。')
             .min(0)
@@ -207,6 +199,9 @@ export const Config: Schema<Config> = Schema.intersect([
                 'API 根地址、带版本的地址或完整接口地址。'
             ),
             apiKey: Schema.string().role('secret').default(''),
+            model: Schema.string()
+                .default('')
+                .description('LLM 模型 ID；群分析、查询和漫画分镜共用此模型。'),
             timeout: Schema.number()
                 .min(1)
                 .max(600)

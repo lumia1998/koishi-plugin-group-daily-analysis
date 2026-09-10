@@ -261,7 +261,7 @@ test('rejects special IPs and non-image output', () => {
 })
 
 test('LLM service parses plain JSON and fenced YAML without ChatLuna', async (t) => {
-    const config = Config({ model: 'model', llm: { baseUrl: base } })
+    const config = Config({ llm: { baseUrl: base, model: 'model' } })
     const service = Object.assign(Object.create(LLMService.prototype), {
         config
     }) as LLMService

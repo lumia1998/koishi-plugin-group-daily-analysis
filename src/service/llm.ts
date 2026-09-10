@@ -25,7 +25,7 @@ export class LLMService extends Service {
         modelName?: string,
         signal?: AbortSignal
     ): Promise<string> {
-        const model = modelName || this.config.model
+        const model = modelName || this.config.llm.model
         const api = this.config.llm
         if (!api?.baseUrl || !model)
             throw new Error('请配置自定义 LLM API 地址和模型。')
@@ -225,8 +225,7 @@ export class LLMService extends Service {
         try {
             const intent = await this._callLLM<QueryIntent>(
                 prompt,
-                '群分析请求解析',
-                this.config.smallModel || this.config.model
+                '群分析请求解析'
             )
             return intent ?? null
         } catch (error) {

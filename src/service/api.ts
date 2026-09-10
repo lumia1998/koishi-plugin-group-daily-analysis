@@ -6,6 +6,7 @@ export interface ApiConfig {
     protocol: TextProtocol
     baseUrl: string
     apiKey: string
+    model: string
     timeout: number
     maxOutputTokens: number
 }
