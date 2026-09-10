@@ -21,12 +21,14 @@ export function endpoint(base: string, path: string): string {
     ) {
         throw new Error('API 地址必须是 HTTP(S) 地址，不能包含用户名或密码。')
     }
-    const current = url.pathname.replace(/\/$/, '')
-    if (
-        current.endsWith(path) ||
-        /:(generateContent|streamGenerateContent)$/.test(current)
-    )
-        return url.toString()
+    // Strip a known operation before selecting the requested endpoint. This also
+    // lets model discovery work when the user supplied a full inference URL.
+    const current = url.pathname
+        .replace(/\/$/, '')
+        .replace(
+            /\/(?:responses|chat\/completions|messages|images\/(?:edits|generations)|models(?:\/[^/]+:(?:generateContent|streamGenerateContent))?)$/,
+            ''
+        )
     const suffix = /\/v1(?:beta)?$/.test(current)
         ? path.replace(/^\/v1(?:beta)?/, '')
         : path

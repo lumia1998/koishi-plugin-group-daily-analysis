@@ -21,6 +21,7 @@ export interface Config {
     llm: ApiConfig
     comic: {
         enabled: boolean
+        autoSend: boolean
         protocol: 'openai-images' | 'google-v1beta'
         baseUrl: string
         apiKey: string
@@ -196,12 +197,14 @@ export const Config: Schema<Config> = Schema.intersect([
                 'openai-chat'
             ]).default('openai-responses'),
             baseUrl: Schema.string().description(
-                'API 根地址、带版本的地址或完整接口地址。'
+                '推荐填写带版本的基础地址，例如 http://10.1.2.30:8317/v1；Google 使用 /v1beta。也支持完整接口地址：Responses 为 /v1/responses，Chat 为 /v1/chat/completions，Anthropic 为 /v1/messages。保存地址和密钥后自动获取模型列表。'
             ),
             apiKey: Schema.string().role('secret').default(''),
-            model: Schema.string()
+            model: Schema.dynamic('group-daily-analysis.text-model')
                 .default('')
-                .description('LLM 模型 ID；群分析、查询和漫画分镜共用此模型。'),
+                .description(
+                    '从自动获取的列表选择文本模型；群分析、查询和漫画分镜共用。接口不提供模型列表时可手动填写 ID。'
+                ),
             timeout: Schema.number()
                 .min(1)
                 .max(600)
@@ -211,16 +214,25 @@ export const Config: Schema<Config> = Schema.intersect([
         }),
         comic: Schema.object({
             enabled: Schema.boolean().default(false),
+            autoSend: Schema.boolean()
+                .default(false)
+                .description(
+                    '定时群分析报告发送后，同时生成并发送当天群漫画。需要启用漫画功能。'
+                ),
             protocol: Schema.union(['openai-images', 'google-v1beta']).default(
                 'google-v1beta'
             ),
             baseUrl: Schema.string().description(
-                '生图 API 地址，和 LLM 分开配置。OpenAI 参考图使用 /v1/images/edits。'
+                '推荐填写 http://10.1.2.30:8317/v1，Google 使用 /v1beta。也可填完整地址，如 http://10.1.2.30:8317/v1/images/edits；OpenAI 有参考图时自动使用 images/edits，无参考图时使用 images/generations。保存地址和密钥后自动获取模型列表。'
             ),
             apiKey: Schema.string().role('secret').default(''),
-            model: Schema.string().description('支持图片输出的模型 ID。'),
-            referenceImage: Schema.string().description(
-                '角色三视图本地文件路径；相对路径以 Koishi 工作目录为基准。'
+            model: Schema.dynamic('group-daily-analysis.image-model')
+                .default('')
+                .description(
+                    '选择支持图片输出的模型。列表由生图服务提供，可能包含文本模型；请根据服务商说明选择，也可手动输入。'
+                ),
+            referenceImage: Schema.path({ filters: ['file'] }).description(
+                '点击选择 Koishi 所在机器上的角色三视图（PNG、JPEG 或 WebP，最大 20MB）；留空不使用参考图。'
             ),
             timeout: Schema.number().min(1).max(600).default(300),
             maxTopics: Schema.number().min(1).max(6).step(1).default(3),

@@ -8,11 +8,13 @@ import { plugin } from './plugin'
 import type {} from 'koishi-plugin-puppeteer'
 import type { Config as GroupAnalysisConfig } from './config'
 import { cron } from './cron'
+import { registerModelLists } from './models'
 
 export * from './config'
 export * from './service/message'
 
 export function apply(ctx: Context, config: GroupAnalysisConfig) {
+    registerModelLists(ctx, config)
     ctx.plugin(MessageService, config)
     ctx.plugin(LLMService, config)
     ctx.plugin(AnalysisService, config)

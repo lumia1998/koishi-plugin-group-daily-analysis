@@ -9,7 +9,8 @@ import {
 } from '../src/service/api'
 import { generateImage, imageMime, isPublicIPv4 } from '../src/service/image'
 import { LLMService } from '../src/service/llm'
-import { apply } from '../src/plugins/comic'
+import { apply, todayWindow } from '../src/plugins/comic'
+import { listModels } from '../src/models'
 
 const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
@@ -293,6 +294,7 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
     })
     let action: any
     let calls = 0
+    const events: Record<string, Function> = {}
     const sent: unknown[] = []
     const session = {
         platform: 'onebot',
@@ -304,8 +306,20 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
     }
     const ctx = {
         baseDir: process.cwd(),
-        on() {},
-        command() {
+        on(name: string, callback: Function) {
+            events[name] = callback
+        },
+        bots: [
+            {
+                platform: 'onebot',
+                selfId: 'bot',
+                sendMessage: async (_channel: string, value: unknown) =>
+                    sent.push(value)
+            }
+        ],
+        command(name: string, _description: string, options: any) {
+            assert.equal(name, '群漫画')
+            assert.equal(options.checkArgCount, true)
             return {
                 alias() {
                     return this
@@ -316,7 +330,12 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
             }
         },
         chatluna_group_analysis_message: {
-            async getHistoricalMessages() {
+            async getHistoricalMessages(options: any) {
+                assert.equal(options.startTime.getHours(), 0)
+                assert.equal(
+                    options.startTime.toDateString(),
+                    options.endTime.toDateString()
+                )
                 return Array.from({ length: 100 }, () => ({
                     userId: 'user',
                     username: 'User',
@@ -355,7 +374,6 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
         await action({ session: { ...session, isDirect: true } }),
         /群聊/
     )
-    assert.match(await action({ session }, 8), /1 到 7/)
     const first = action({ session }, 1)
     assert.match(await action({ session }, 1), /正在生成/)
     await first
@@ -373,4 +391,91 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
     assert.equal(calls, 2)
     assert.match(await action({ session: other }, 1), /冷却/)
     assert.equal(calls, 2)
+    t.mock.restoreAll()
+    t.mock.method(globalThis, 'fetch', async () => {
+        calls++
+        return json({
+            candidates: [
+                {
+                    content: {
+                        parts: [
+                            { inlineData: { data: png.toString('base64') } }
+                        ]
+                    }
+                }
+            ]
+        })
+    })
+    const group = {
+        platform: 'onebot',
+        selfId: 'bot',
+        guildId: 'scheduled',
+        channelId: 'scheduled',
+        enabled: true
+    }
+    await events['group-daily-analysis/auto-comic'](group)
+    assert.equal(calls, 2, 'automatic comics are opt-in')
+    config.comic.autoSend = true
+    await events['group-daily-analysis/auto-comic'](group)
+    assert.equal(calls, 3)
+    await events['group-daily-analysis/auto-comic'](group)
+    assert.equal(calls, 3, 'scheduled comics share the cooldown')
+})
+
+test('comic window always starts at local midnight', () => {
+    const now = new Date(2026, 8, 10, 15, 30)
+    const window = todayWindow(now)
+    assert.equal(window.startTime.getTime(), new Date(2026, 8, 10).getTime())
+    assert.equal(window.endTime, now)
+})
+
+test('full image endpoints switch operations without duplicate paths', () => {
+    assert.equal(
+        endpoint(base + '/v1/images/edits', '/v1/images/generations'),
+        base + '/v1/images/generations'
+    )
+    assert.equal(
+        endpoint(base + '/v1/images/edits', '/v1/models'),
+        base + '/v1/models'
+    )
+    assert.equal(
+        endpoint(
+            base + '/v1beta/models/old:generateContent',
+            '/v1beta/models/new:generateContent'
+        ),
+        base + '/v1beta/models/new:generateContent'
+    )
+})
+
+test('model discovery handles authentication, full endpoints and pagination', async (t) => {
+    const config = Config({}).llm
+    config.baseUrl = base + '/v1/responses'
+    config.apiKey = 'test-key'
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        assert.equal(String(url), base + '/v1/models')
+        assert.equal(
+            new Headers(init?.headers).get('Authorization'),
+            'Bearer test-key'
+        )
+        return json({ data: [{ id: 'b' }, { id: 'a' }, { id: 'a' }] })
+    })
+    assert.deepEqual(await listModels(config), ['a', 'b'])
+    t.mock.restoreAll()
+    config.protocol = 'google-v1beta'
+    config.baseUrl = base + '/v1beta/models/old:generateContent'
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+        assert.equal(
+            new Headers(init?.headers).get('x-goog-api-key'),
+            'test-key'
+        )
+        const parsed = new URL(String(url))
+        assert.equal(parsed.pathname, '/v1beta/models')
+        return parsed.searchParams.has('pageToken')
+            ? json({ models: [{ name: 'models/image-b' }] })
+            : json({
+                  models: [{ name: 'models/text-a' }],
+                  nextPageToken: 'next'
+              })
+    })
+    assert.deepEqual(await listModels(config), ['image-b', 'text-a'])
 })

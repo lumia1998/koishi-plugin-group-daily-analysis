@@ -357,8 +357,12 @@ export class AnalysisService extends Service {
 
             if (userGroupInfo) {
                 record.roles =
-                    userGroupInfo.roles?.map((role) => role.name || role.id) ??
-                    []
+                    userGroupInfo.roles?.map(
+                        (role: string | { name?: string; id: string }) =>
+                            typeof role === 'string'
+                                ? role
+                                : role.name || role.id
+                    ) ?? []
             }
 
             const remainingLimit = totalLimit - results.length
@@ -863,6 +867,10 @@ export class AnalysisService extends Service {
                                 channelId: group.channelId
                             },
                             this.config.cronAnalysisDays
+                        )
+                        await this.ctx.parallel(
+                            'group-daily-analysis/auto-comic',
+                            group
                         )
                     } catch (err) {
                         this.ctx.logger.error(

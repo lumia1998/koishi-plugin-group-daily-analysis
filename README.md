@@ -38,7 +38,7 @@ _Koishi 群聊分析插件_
 
 ### 从旧配置迁移
 
-在插件配置中填写 `llm.protocol`、`llm.baseUrl`、`llm.apiKey` 和 `llm.model`，填写供应商的实际模型 ID，不再填写 ChatLuna 的平台/模型选择器值。插件只需要两个模型：一个 `llm.model` 负责文本分析、查询和漫画分镜；一个 `comic.model` 负责生图。缺少 API 配置时不会回退 ChatLuna。
+在插件配置中填写 `llm.protocol`、`llm.baseUrl` 和 `llm.apiKey` 并保存，插件会自动获取模型列表，然后在 `llm.model` 中选择模型。生图模型同样在保存 `comic` 地址和密钥后获取。模型列表接口不可用时仍支持手动输入供应商的模型 ID；不会自动替你选择或调用模型。插件只需要两个模型：一个 `llm.model` 负责文本分析、查询和漫画分镜；一个 `comic.model` 负责生图。缺少 API 配置时不会回退 ChatLuna。
 
 | `llm.protocol` | 请求接口 |
 | --- | --- |
@@ -53,11 +53,14 @@ _Koishi 群聊分析插件_
 
 1. 启用 `comic.enabled`；单独填写 `comic.baseUrl`、`comic.apiKey` 和生图 `comic.model`。
 2. `comic.protocol` 选择 `google-v1beta` 或 `openai-images`。Google 模型须支持图片输入/输出；OpenAI 带参考图时使用 `/v1/images/edits`（multipart），不带时使用 `/v1/images/generations`。并非所有兼容代理都支持参考图，失败时不会静默丢弃参考图。
-3. 将 PNG/JPEG/WebP 三视图放在本机，填写 `comic.referenceImage`（绝对路径，或相对 Koishi 工作目录的路径，最大 20MB）。该路径仅由插件管理员配置，图片会上传给生图供应商；留空则无参考图。三视图不发送给文本模型。
+3. 将 PNG/JPEG/WebP 三视图放在 Koishi 所在机器上，通过 `comic.referenceImage` 文件选择控件选择图片（最大 20MB）。远程部署时选择的是服务器文件，不是浏览器所在电脑的文件。该图片会上传给生图供应商；留空则无参考图。三视图不发送给文本模型。
 4. 编辑 `comic.prompt` 控制分镜。`{topics}` 替换为提取的话题，`{maxTopics}` 替换为漫画话题上限（默认 3）。默认要求英文画面描述、简短中文气泡和旁白，以及角色外观一致性。最终分镜全文连同三视图发送到生图 API。
-5. 在已启用分析的群发送 `群漫画` 或 `群漫画 2`。需要 Koishi 权限等级 3，天数为向前回溯的 1–7 个整 24 小时；受 `maxMessages`、`minMessages` 和现有消息过滤规则限制。
+5. 在已启用分析的群发送 `群漫画`，无需天数参数。需要 Koishi 权限等级 3，仅分析 Koishi 所在时区当天 00:00 至今的消息，不受 `useCalendarDayWindow` 和 `cronAnalysisDays` 影响；受 `maxMessages`、`minMessages` 和现有消息过滤规则限制。
+6. 如需定时附带漫画，开启 `comic.autoSend`（默认关闭）并配置 `cronSchedule`。定时群报告处理完成后，向同一群发送当天漫画。
 
-漫画仅手动触发，不改变定时报告。每群同时只运行一个漫画任务，调用生图接口后默认冷却 10 分钟（`comic.cooldown`），失败也不自动重复付费生图。冷却状态仅在内存中，重载后重置。`comic.timeout` 默认 300 秒；OpenAI 使用 `comic.size`（默认 `1536x1024`，须按模型支持调整），Google 使用 16:9。
+手动与定时漫画共用每群并发限制和冷却时间。每群同时只运行一个漫画任务，调用生图接口后默认冷却 10 分钟（`comic.cooldown`），失败也不自动重复付费生图。冷却状态仅在内存中，重载后重置。`comic.timeout` 默认 300 秒；OpenAI 使用 `comic.size`（默认 `1536x1024`，须按模型支持调整），Google 使用 16:9。
+
+地址示例：OpenAI 文本和生图的 `baseUrl` 都可以填 `http://10.1.2.30:8317/v1`。生图也可以填完整的 `http://10.1.2.30:8317/v1/images/edits`；插件会根据是否有参考图选用 `edits` 或 `generations`，不会重复拼接路径。Google 推荐填写 `https://generativelanguage.googleapis.com/v1beta`。模型列表从同一服务的 `/v1/models` 或 `/v1beta/models` 获取；服务商返回的列表可能包含不支持生图的模型，请选择支持图片输出的模型。
 
 生图响应支持 base64 图片，或公开 HTTPS 域名返回的图片 URL；URL 下载不跟随重定向，仅连接经校验的公网 IPv4。内网/仅 IPv6 下载地址不支持。输出图片最大 20MB，API JSON 响应最大 32MB。群聊消息会发给文本供应商，话题/分镜和参考图会发给生图供应商，请事先确认群成员知情。
 
@@ -68,7 +71,7 @@ _Koishi 群聊分析插件_
 - `群分析 <query: string>` - 分析群聊记录，可以用自然语言指定分析的时间，关键词，或者人物，话题。
 - `群分析.启用` - 在发送的群中启用群聊分析
 - `群分析.禁用` - 在发送的群中禁用群聊分析
-- `群漫画 [days]` / `group-comic [days]` - 从最近若干天群话题生成漫画（默认 1 天）
+- `群漫画` / `group-comic` - 从当天 00:00 至今的群话题生成漫画
 
 ### 配置
 
