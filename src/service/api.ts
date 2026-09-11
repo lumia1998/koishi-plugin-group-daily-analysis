@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { errorKind, Trace } from '../diagnostics'
+import { errorDetail, errorKind, Trace } from '../diagnostics'
 export type TextProtocol =
     | 'openai-responses'
     | 'anthropic-messages'
@@ -56,8 +56,36 @@ export function endpoint(base: string, path: string): string {
 }
 
 export async function readJson(response: Response): Promise<any> {
-    if (!response.ok)
-        throw new Error(`API 请求失败（HTTP ${response.status}）。`)
+    if (!response.ok) {
+        let detail = ''
+        const reader = response.body?.getReader()
+        if (reader) {
+            const chunks: Uint8Array[] = []
+            let length = 0
+            try {
+                while (length < 16384) {
+                    const { done, value } = await reader.read()
+                    if (done) break
+                    chunks.push(value.subarray(0, 16384 - length))
+                    length += value.length
+                }
+                const raw = Buffer.concat(chunks).toString('utf8')
+                try {
+                    const body = JSON.parse(raw)
+                    const message =
+                        body.error?.message ?? body.message ?? body.error
+                    if (typeof message === 'string') detail = message
+                } catch {
+                    if (!raw.trimStart().startsWith('<')) detail = raw
+                }
+            } finally {
+                await reader.cancel()
+            }
+        }
+        throw new Error(
+            `API 请求失败（HTTP ${response.status}）。${errorDetail(detail)}`
+        )
+    }
     if (!response.body) throw new Error('API 响应为空。')
     const reader = response.body.getReader()
     const chunks: Uint8Array[] = []
@@ -121,10 +149,7 @@ export async function requestJson(
             elapsedMs: Date.now() - started
         })
         if (controller.signal.aborted) throw new Error('API 请求超时或已取消。')
-        // Do not propagate fetch errors containing URLs or provider response bodies.
-        if (error instanceof Error && error.message.startsWith('API 请求失败'))
-            throw error
-        throw new Error('API 网络请求或响应解析失败。')
+        throw new Error(errorDetail(error, [key]))
     } finally {
         clearTimeout(timer)
         signal?.removeEventListener('abort', abort)

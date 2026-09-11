@@ -12,7 +12,7 @@ import {
     loadReference,
     loadReferences
 } from '../service/image'
-import { createTrace, errorKind } from '../diagnostics'
+import { createTrace, errorDetail, errorKind } from '../diagnostics'
 import { buildComicImagePrompt, buildStoryboardPrompt } from '../comic-prompts'
 import { comicPreset } from '../service/preset'
 import { ConcurrencyLimiter } from '../service/limiter'
@@ -230,13 +230,20 @@ export function apply(ctx: Context, config: Config) {
                 trace('发送完成', { bytes: image.length })
             }
         } catch (error) {
+            const detail = errorDetail(error, [
+                config.comic.apiKey,
+                config.llm?.apiKey
+            ])
             trace('任务失败', {
                 stage,
                 reason: errorKind(error),
+                detail,
                 cancelled: controller.signal.aborted
             })
             if (!controller.signal.aborted)
-                return '漫画生成或发送失败，请检查 API 配置、三视图路径、模型图片输入能力和网络。不会自动重复付费生图。'
+                return h.text(
+                    `群漫画失败（${stage}）：${detail}\n不会自动重复付费生图。`
+                )
         } finally {
             trace('任务结束', { stage, elapsedMs: Date.now() - started })
             running.delete(key)

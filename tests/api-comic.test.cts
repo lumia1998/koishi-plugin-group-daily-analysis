@@ -17,6 +17,38 @@ import {
     buildComicImagePrompt
 } from '../src/comic-prompts'
 
+test('API errors preserve provider details and network codes without credentials', async (t) => {
+    t.mock.method(
+        globalThis,
+        'fetch',
+        async () =>
+            new Response(
+                JSON.stringify({
+                    error: {
+                        message:
+                            'model does not support image input; key=my-secret-key'
+                    }
+                }),
+                { status: 400 }
+            )
+    )
+    await assert.rejects(
+        requestJson('https://example.com', 'my-secret-key', {}, 1),
+        (error: Error) =>
+            /HTTP 400/.test(error.message) &&
+            error.message.includes('model does not support image input') &&
+            !error.message.includes('my-secret-key')
+    )
+    t.mock.restoreAll()
+    t.mock.method(globalThis, 'fetch', async () => {
+        throw new Error('fetch failed', { cause: { code: 'ECONNREFUSED' } })
+    })
+    await assert.rejects(
+        requestJson('https://example.com', '', {}, 1),
+        /ECONNREFUSED/
+    )
+})
+
 test('comic prompts inject persona and enforce reference identity without guessing appearance', () => {
     const config = Config({}).comic
     const topics = [{ topic: 'test', detail: 'details', contributors: [] }]
@@ -244,7 +276,7 @@ test('refused, truncated, failed, malformed and canceled responses fail safely',
     )
     await assert.rejects(
         requestJson(base, 'secret', {}, 1),
-        /^Error: API 请求失败（HTTP 401）。$/
+        /^Error: API 请求失败（HTTP 401）。\[已隐藏\] provider error$/
     )
     t.mock.restoreAll()
     t.mock.method(
@@ -254,7 +286,8 @@ test('refused, truncated, failed, malformed and canceled responses fail safely',
     )
     await assert.rejects(
         requestJson(base, 'secret', {}, 1),
-        /^Error: API 网络请求或响应解析失败。$/
+        (error: Error) =>
+            !error.message.includes('secret') && /JSON/.test(error.message)
     )
     t.mock.restoreAll()
     t.mock.method(globalThis, 'fetch', async (_url, init) => {
@@ -461,7 +494,10 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
         return new Response('upstream failed', { status: 503 })
     })
     const other = { ...session, channelId: 'other' }
-    assert.match(await action({ session: other }, 1), /失败/)
+    const failure = await action({ session: other }, 1)
+    assert.equal(failure.type, 'text')
+    assert.match(failure.attrs.content, /群漫画失败（调用生图 API）/)
+    assert.match(failure.attrs.content, /HTTP 503.*upstream failed/)
     assert.equal(calls, 2)
     assert.match(await action({ session: other }, 1), /冷却/)
     assert.equal(calls, 2)
