@@ -48,6 +48,7 @@ export class AnimeSkinRenderer implements SkinRenderer {
             <div class="bubble-meta">
                — ${quote.sender}
             </div>
+            ${quote.reason ? `<div class="bubble-reason">${quote.reason}</div>` : ''}
           </div>
         `
             )

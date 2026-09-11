@@ -45,7 +45,6 @@ export interface Config {
         characterDescription: string
         prompt: string
         timeout: number
-        maxTopics: number
         cooldown: number
         size: string
         presetMode: 'inherit' | 'none' | 'custom'
@@ -291,20 +290,14 @@ export const Config: Schema<Config> = Schema.intersect([
             Schema.const('newspaper').description('报纸风格'),
             Schema.const('art').description('艺术风格'),
             Schema.const('scrapbook').description('手账风格'),
-            Schema.const('simple').description('简洁（MD3 兼容别名）'),
-            Schema.const('ATRI').description('ATRI（二次元兼容别名）'),
-            Schema.const('BlueArchive').description(
-                'Blue Archive（二次元兼容别名）'
-            ),
-            Schema.const('retro_futurism').description(
-                '复古未来（报纸兼容别名）'
-            ),
-            Schema.const('art_nouveau').description('新艺术（艺术兼容别名）'),
-            Schema.const('spring_festival').description('节日（手账兼容别名）'),
-            Schema.const('HatsuneMiku').description(
-                '初音未来（二次元兼容别名）'
-            ),
-            Schema.const('hack').description('终端（报纸兼容别名）')
+            Schema.const('simple').description('简洁'),
+            Schema.const('ATRI').description('ATRI'),
+            Schema.const('BlueArchive').description('Blue Archive'),
+            Schema.const('retro_futurism').description('复古未来'),
+            Schema.const('art_nouveau').description('新艺术'),
+            Schema.const('spring_festival').description('节日'),
+            Schema.const('HatsuneMiku').description('初音未来'),
+            Schema.const('hack').description('终端')
         ])
             .description('渲染界面皮肤。')
             .default('md3')
@@ -353,30 +346,6 @@ export const Config: Schema<Config> = Schema.intersect([
                 .max(60)
                 .default(1)
                 .description('文本 API 重试退避秒数。'),
-            topicModel: Schema.dynamic('group-daily-analysis.text-model')
-                .default('')
-                .description('话题分析专用模型，留空继承主模型。'),
-            titleModel: Schema.dynamic('group-daily-analysis.text-model')
-                .default('')
-                .description('用户称号专用模型，留空继承主模型。'),
-            goldenQuoteModel: Schema.dynamic('group-daily-analysis.text-model')
-                .default('')
-                .description('金句分析专用模型，留空继承主模型。'),
-            qualityModel: Schema.dynamic('group-daily-analysis.text-model')
-                .default('')
-                .description('聊天质量锐评专用模型，留空继承主模型。'),
-            personaModel: Schema.dynamic('group-daily-analysis.text-model')
-                .default('')
-                .description('用户画像专用模型，留空继承主模型。'),
-            queryModel: Schema.dynamic('group-daily-analysis.text-model')
-                .default('')
-                .description('查询解析专用模型，留空继承主模型。'),
-            chatModel: Schema.dynamic('group-daily-analysis.text-model')
-                .default('')
-                .description('查询对话专用模型，留空继承主模型。'),
-            comicModel: Schema.dynamic('group-daily-analysis.text-model')
-                .default('')
-                .description('漫画分镜专用模型，留空继承主模型。'),
             timeout: Schema.number()
                 .min(1)
                 .max(600)
@@ -475,7 +444,6 @@ export const Config: Schema<Config> = Schema.intersect([
                     '漫画主角的外观、服装、性格和说话方式。分镜模型不会看到参考图，请在这里描述角色；每格都使用此角色，外观冲突时以参考图为准。'
                 ),
             timeout: Schema.number().min(1).max(600).default(300),
-            maxTopics: Schema.number().min(1).max(6).step(1).default(3),
             cooldown: Schema.number()
                 .min(0)
                 .default(10)

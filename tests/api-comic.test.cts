@@ -90,7 +90,7 @@ test('schema supplies nested API and disabled-comic defaults', () => {
     assert.equal(config.llm.protocol, 'openai-responses')
     assert.equal(config.llm.timeout, 120)
     assert.equal(config.comic.enabled, false)
-    assert.equal(config.comic.maxTopics, 3)
+    assert.equal(config.comic.maxTopics, undefined)
     assert.equal(config.debug, false)
     assert.equal(config.chatQualityAnalysis, true)
     assert.deepEqual(config.cronOutputFormats, [])

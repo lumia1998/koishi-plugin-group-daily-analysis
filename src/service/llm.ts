@@ -198,23 +198,6 @@ export class LLMService extends Service {
         return this.generateText(prompt, modelName)
     }
 
-    private moduleModel(
-        name: keyof Pick<
-            NonNullable<Config['llm']>,
-            | 'topicModel'
-            | 'titleModel'
-            | 'goldenQuoteModel'
-            | 'qualityModel'
-            | 'personaModel'
-            | 'queryModel'
-            | 'chatModel'
-            | 'comicModel'
-        >
-    ): string | undefined {
-        const value = this.config.llm?.[name]
-        return value?.trim() || undefined
-    }
-
     private formatTimeRange(context?: AnalysisPromptContext): string {
         if (!context?.timeRange) return '（未指定）'
 
@@ -264,7 +247,7 @@ export class LLMService extends Service {
         return this._callLLM<SummaryTopic[]>(
             prompt,
             '话题分析',
-            this.moduleModel('topicModel'),
+            undefined,
             signal
         ).then((data) =>
             Array.isArray(data)
@@ -298,7 +281,7 @@ export class LLMService extends Service {
         return this._callLLM<UserTitle[]>(
             prompt,
             '用户称号分析',
-            this.moduleModel('titleModel')
+            undefined
         ).then((data) =>
             Array.isArray(data)
                 ? data
@@ -319,18 +302,15 @@ export class LLMService extends Service {
                 .replace('{maxGoldenQuotes}', String(maxQuotes)),
             context
         )
-        return this._callLLM<GoldenQuote[]>(
-            prompt,
-            '金句分析',
-            this.moduleModel('goldenQuoteModel')
-        ).then((data) =>
-            Array.isArray(data)
-                ? data
-                      .filter(
-                          (item) => item && typeof item.content === 'string'
-                      )
-                      .slice(0, maxQuotes)
-                : []
+        return this._callLLM<GoldenQuote[]>(prompt, '金句分析', undefined).then(
+            (data) =>
+                Array.isArray(data)
+                    ? data
+                          .filter(
+                              (item) => item && typeof item.content === 'string'
+                          )
+                          .slice(0, maxQuotes)
+                    : []
         )
     }
 
@@ -343,7 +323,7 @@ export class LLMService extends Service {
         )
         const response = await this._callLLM<
             ChatQualityReview | ChatQualityReview[]
-        >(prompt, '聊天质量锐评', this.moduleModel('qualityModel'))
+        >(prompt, '聊天质量锐评', undefined)
         const value = Array.isArray(response) ? response[0] : response
         if (!value || typeof value !== 'object') return null
         const dimensions = Array.isArray(value.dimensions)
@@ -403,7 +383,7 @@ export class LLMService extends Service {
 
         const response = await this._callLLM<
             UserPersonaProfile | UserPersonaProfile[]
-        >(filledPrompt, '用户画像分析', this.moduleModel('personaModel'))
+        >(filledPrompt, '用户画像分析', undefined)
         const result = Array.isArray(response) ? response[0] : response
         if (!result) return null
         result.userId = userId
@@ -444,7 +424,7 @@ export class LLMService extends Service {
             const intent = await this._callLLM<QueryIntent>(
                 prompt,
                 '群分析请求解析',
-                this.moduleModel('queryModel'),
+                undefined,
                 undefined,
                 ''
             )
@@ -487,11 +467,7 @@ export class LLMService extends Service {
             .replace('{query}', promptContext.query)
             .replace('{analysisResult}', promptContext.analysisResult || '')
 
-        return this._callText(
-            prompt,
-            '群分析对话回复',
-            this.moduleModel('chatModel')
-        )
+        return this._callText(prompt, '群分析对话回复', undefined)
     }
 }
 

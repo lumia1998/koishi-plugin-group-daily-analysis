@@ -73,7 +73,7 @@ _Koishi 群聊分析插件_
 1. 启用 `comic.enabled`；单独填写 `comic.baseUrl`、`comic.apiKey` 和生图 `comic.model`。
 2. `comic.protocol` 选择 `google-v1beta` 或 `openai-images`。Google 模型须支持图片输入/输出；OpenAI 带参考图时使用 `/v1/images/edits`（multipart），不带时使用 `/v1/images/generations`。并非所有兼容代理都支持参考图，失败时不会静默丢弃参考图。
 3. 将 PNG/JPEG/WebP 三视图放在 Koishi 所在机器上，通过 `comic.referenceImage` 文件选择控件选择图片（最大 20MB）。远程部署时选择的是服务器文件，不是浏览器所在电脑的文件。该图片会上传给生图供应商；留空则无参考图。三视图不发送给文本模型。
-4. 编辑 `comic.prompt` 控制分镜。`{topics}` 替换为提取的话题，`{maxTopics}` 替换为漫画话题上限（默认 3）。默认要求英文画面描述、简短中文气泡和旁白，以及角色外观一致性。最终分镜全文连同三视图发送到生图 API。
+4. 编辑 `comic.prompt` 控制分镜。`{topics}` 替换为提取的话题，`{maxTopics}` 替换为实际话题数量，一话题一分镜，全部分镜一次生成在同一张漫画中。默认要求英文画面描述、简短中文气泡和旁白，以及角色外观一致性。最终分镜全文连同三视图发送到生图 API。
 5. 在已启用分析的群发送 `群漫画`，无需天数参数。需要 Koishi 权限等级 3，仅分析 Koishi 所在时区当天 00:00 至今的消息，不受 `useCalendarDayWindow` 和 `cronAnalysisDays` 影响；受 `maxMessages`、`minMessages` 和现有消息过滤规则限制。
 6. 如需日报附带漫画，开启 `comic.autoSend`（默认关闭）。手动、自然语言、定时和增量即时日报会复用报告话题，在渲染前启动漫画后台任务；报告发送失败不阻止生图。定时日报还需要配置 `cronSchedule`。空话题不会自动重新调用模型提取；手动 `群漫画 -d 3` 可独立提取近期话题。
 
@@ -119,7 +119,7 @@ Token 记录按分析调用计量，增量批次单独记录；缓存重发和�
 - `cronAnalysisDays` - 定时任务分析的天数
 - `promptTopic` - 用于话题总结的 Prompt 模板
 
-聊天质量模块、话题/称号/金句模块都可独立关闭；`llm.topicModel`、`titleModel`、`goldenQuoteModel`、`qualityModel`、`personaModel`、`queryModel`、`chatModel` 和 `comicModel` 可分别指定文本模型。`llm.retryCount` 与 `retryBackoffSeconds` 控制失败重试。开启 `incrementalEnabled` 后按 `incrementalBatchSize` 累积消息，在 `incrementalWindowHours` 滑动窗口内合并去重；失败按 `incrementalFallbackFull` 回退全量分析。
+聊天质量模块、话题/称号/金句模块都可独立关闭；所有文本分析、查询、用户画像和漫画分镜统一使用 `llm.model` 主模型；旧版各模块的模型覆盖配置不再生效。漫画绘图仍使用独立的生图模型。`llm.retryCount` 与 `retryBackoffSeconds` 控制失败重试。开启 `incrementalEnabled` 后按 `incrementalBatchSize` 累积消息，在 `incrementalWindowHours` 滑动窗口内合并去重；失败按 `incrementalFallbackFull` 回退全量分析。
 
 启用 `outputFormat: html` 或填写 `cronOutputFormats` 可保存 HTML/图片/PDF/文本；`htmlBaseUrl` 设置外链前缀。OneBot 下可按需打开 `uploadGroupFile`/`uploadGroupAlbum`，插件只在适配器暴露相应能力时调用。
 

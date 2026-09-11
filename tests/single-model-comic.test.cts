@@ -1,0 +1,68 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { Config } from '../src/config'
+import {
+    buildStoryboardPrompt,
+    buildComicImagePrompt
+} from '../src/comic-prompts'
+import { LLMService } from '../src/service/llm'
+
+test('comic covers all topics even with the old three-topic limit saved', () => {
+    const config = Config({}).comic
+    const topics = Array.from({ length: 7 }, (_, i) => ({
+        topic: `主题${i + 1}`,
+        detail: '详情',
+        contributors: []
+    }))
+    const prompt = buildStoryboardPrompt(
+        { ...config, maxTopics: 3 } as any,
+        topics,
+        false
+    )
+    for (const topic of topics) assert.ok(prompt.includes(topic.topic))
+    assert.match(prompt, /7-panel/)
+    assert.match(prompt, /Panel 7:/)
+    assert.match(
+        buildComicImagePrompt('story', config, false, topics.length),
+        /exactly 7 panels/
+    )
+})
+
+test('module model options are absent and saved overrides do not affect requests', async () => {
+    const keys = [
+        'topicModel',
+        'titleModel',
+        'goldenQuoteModel',
+        'qualityModel',
+        'personaModel',
+        'queryModel',
+        'chatModel',
+        'comicModel'
+    ]
+    const schema = JSON.stringify(Config)
+    for (const key of keys) assert.ok(!schema.includes(`"${key}"`))
+    const config = Config({})
+    Object.assign(config.llm, {
+        model: 'main',
+        topicModel: 'old-topic',
+        titleModel: 'old-title',
+        qualityModel: 'old-quality'
+    })
+    const service: any = Object.assign(Object.create(LLMService.prototype), {
+        config,
+        ctx: { logger: { info() {}, warn() {}, error() {} } }
+    })
+    const overrides: unknown[] = []
+    service._callLLM = async (
+        _prompt: string,
+        _task: string,
+        model: unknown
+    ) => {
+        overrides.push(model)
+        return []
+    }
+    await service.summarizeTopics('messages')
+    await service.analyzeUserTitles([])
+    await service.analyzeGoldenQuotes('messages', 5)
+    assert.deepEqual(overrides, [undefined, undefined, undefined])
+})

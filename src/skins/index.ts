@@ -58,10 +58,34 @@ export const skinAliasStyles: Record<string, string> = {
 
 export function applySkinAliasStyles(template: string, skin: string) {
     const css = skinAliasStyles[skin]
-    if (!css) return template
     return template.replace(
         /<\/head>/i,
-        `<style data-skin-alias="${skin}">${css}</style></head>`
+        `<style data-report-layout>
+        .quality-section { grid-column: 1 / -1; min-width: 0; margin: 28px 0; padding: 24px; border: 1px solid currentColor; border-radius: 16px; box-sizing: border-box; }
+        .quality-section:has(> .empty-state) { display: none; }
+        .quality-section h2 { font-size: 24px; margin: 0 0 18px; }
+        .quality-review h3 { font-size: 20px; margin: 0 0 12px; }
+        .quality-review p { line-height: 1.7; margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+        .quality-dimensions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+        .quality-dimension { min-width: 0; padding: 16px; border: 1px solid currentColor; border-radius: 10px; }
+        .quality-dimension > span { float: right; font-weight: 700; margin-left: 12px; }
+        .quality-dimension > strong { overflow-wrap: anywhere; }
+        .quality-summary { padding-top: 16px; border-top: 1px dashed currentColor; }
+        .grid-layout > *, .card-grid > *, .quotes-grid > * { min-width: 0; overflow-wrap: anywhere; }
+        .user-card img, .char-card img, .u-avatar { flex-shrink: 0; }
+        .bubble-reason { margin-top: 12px; padding-top: 12px; border-top: 1px dashed currentColor; line-height: 1.7; overflow-wrap: anywhere; }
+        body[data-skin="scrapbook"] .quality-section, body[data-skin="spring_festival"] .quality-section { background: #fffdf7; color: #40352d; box-shadow: 5px 5px 0 #e5d4f0; }
+        @media (max-width: 600px) { .quality-dimensions { grid-template-columns: 1fr; } }
+        </style>${
+            css
+                ? `<style data-skin-alias="${skin}">${css}
+        body.dark-theme[data-skin="simple"] { background: #18191c; color: #ececf2; }
+        body.dark-theme[data-skin="ATRI"], body.dark-theme[data-skin="BlueArchive"],
+        body.dark-theme[data-skin="HatsuneMiku"] { background: #102b2c; color: #e0f7fa; }
+        body.dark-theme[data-skin="art_nouveau"] { background: #211c17; color: #f5e6ce; }
+        </style>`
+                : ''
+        }</head>`
     )
 }
 
@@ -86,7 +110,7 @@ class SkinRegistry {
                 Object.defineProperties(alias, {
                     id: { value: id, enumerable: true },
                     name: {
-                        value: `${renderer.name}（${id} 专题样式）`,
+                        value: id,
                         enumerable: true
                     }
                 })

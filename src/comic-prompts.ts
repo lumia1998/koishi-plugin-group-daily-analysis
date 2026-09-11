@@ -6,7 +6,7 @@ export function buildStoryboardPrompt(
     topics: SummaryTopic[],
     hasReference: boolean
 ): string {
-    const selected = topics.slice(0, config.maxTopics)
+    const selected = topics
     const persona = config.characterDescription?.trim()
     const identity =
         persona ||
@@ -26,7 +26,7 @@ ${identity}
 ${hasReference ? '生图阶段会附上参考图；外观以参考图为准。没有在角色设定中提供的外观细节不要补写。只设计动作、表情、场景与构图，不改造主角的发型、服装、耳朵、尾巴或配饰。' : ''}
 气泡使用角色口吻的简短中文台词，每条尽量不超过 15 个汉字；每格底部添加不超过 30 字的中文话题标题。
 画面描述使用英文，需渲染的中文用 exact Chinese text 显式指定。背景上下文只用于理解剧情，不得画成长篇文字。
-输出一段完整的纯文本生图提示词，包含全局角色要求和每格的动作、场景、气泡、标题；不要将分格内容放到提示词以外。
+输出一段完整的纯文本生图提示词，以 A ${selected.length}-panel comic strip 开头，依次写出 Panel 1: 到 Panel ${selected.length}:，每格的动作、场景、气泡、标题必须完整。不得遗漏、合并话题或固定为三格。超过三格时使用多行网格布局，按从左到右、从上到下阅读。
 
 【创作任务与话题素材】
 ${task}
@@ -38,10 +38,11 @@ ${task}
 export function buildComicImagePrompt(
     storyboard: string,
     config: Config['comic'],
-    hasReference: boolean
+    hasReference: boolean,
+    topicCount?: number
 ): string {
     const identity = config.characterDescription?.trim()
-    return `CHARACTER CONSISTENCY — applies to EVERY panel:
+    return `${topicCount ? `LAYOUT: Generate ONE complete comic image with exactly ${topicCount} panels, one panel per topic. Include every numbered panel without merging or omitting topics. Use multiple rows when there are more than three panels.\n` : ''}CHARACTER CONSISTENCY — applies to EVERY panel:
 ${
     hasReference
         ? 'The attached image is the authoritative visual reference for the MAIN CHARACTER. Use this exact character as the protagonist in EVERY panel. Preserve the face, hair, outfit, colors, species, ears, tail and accessories shown in the reference. Do not reproduce the reference-sheet layout. Any conflicting appearance or protagonist description in the storyboard below MUST be ignored in favor of the reference image.'

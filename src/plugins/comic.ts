@@ -204,7 +204,7 @@ export function apply(ctx: Context, config: Config) {
             const storyboard =
                 await ctx.chatluna_group_analysis_llm.generateText(
                     prompt,
-                    config.llm?.comicModel || undefined,
+                    undefined,
                     controller.signal,
                     presetName
                 )
@@ -217,7 +217,8 @@ export function apply(ctx: Context, config: Config) {
                     buildComicImagePrompt(
                         storyboard,
                         comicConfig,
-                        references.length > 0
+                        references.length > 0,
+                        resolvedTopics.length
                     ),
                     references,
                     controller.signal,

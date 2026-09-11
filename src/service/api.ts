@@ -15,14 +15,6 @@ export interface ApiConfig {
     maxOutputTokens: number
     retryCount?: number
     retryBackoffSeconds?: number
-    topicModel?: string
-    titleModel?: string
-    goldenQuoteModel?: string
-    qualityModel?: string
-    personaModel?: string
-    queryModel?: string
-    chatModel?: string
-    comicModel?: string
 }
 
 export interface TextMessage {
