@@ -73,6 +73,21 @@ export function applySkinAliasStyles(template: string, skin: string) {
         .quality-summary { padding-top: 16px; border-top: 1px dashed currentColor; }
         .grid-layout > *, .card-grid > *, .quotes-grid > * { min-width: 0; overflow-wrap: anywhere; }
         .user-card img, .char-card img, .u-avatar { flex-shrink: 0; }
+        body[data-report="persona"] .tag, body[data-report="persona"] .chip,
+        body[data-report="persona"] .washi-tape-tag, body[data-report="persona"] .news-tag {
+            max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; min-width: 0;
+        }
+        body[data-report="persona"] .tags-section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        body[data-report="persona"] .tag-group, body[data-report="persona"] .header-info,
+        body[data-report="persona"] .column-main-wide, body[data-report="persona"] .column-sidebar { min-width: 0; }
+        body[data-report="persona"] .persona-header { align-items: flex-start; }
+        body[data-report="persona"] .main-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 28px; }
+        body[data-report="persona"] .profile-photo { max-height: 320px; object-fit: contain; }
+        @media (max-width: 700px) {
+            body[data-report="persona"] .main-columns, body[data-report="persona"] .tags-section { grid-template-columns: 1fr; }
+        }
+        body[data-report="persona"] p, body[data-report="persona"] h1,
+        body[data-report="persona"] .profile-name, body[data-report="persona"] .article-text { overflow-wrap: anywhere; }
         .bubble-reason { margin-top: 12px; padding-top: 12px; border-top: 1px dashed currentColor; line-height: 1.7; overflow-wrap: anywhere; }
         body[data-skin="scrapbook"] .quality-section, body[data-skin="spring_festival"] .quality-section { background: #fffdf7; color: #40352d; box-shadow: 5px 5px 0 #e5d4f0; }
         @media (max-width: 600px) { .quality-dimensions { grid-template-columns: 1fr; } }

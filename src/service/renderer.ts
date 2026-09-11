@@ -520,7 +520,10 @@ export class RendererService extends Service {
         // 将头像转换为 Base64
         const dynamicAvatarBase64 = await this.imageToBase64(dynamicAvatarUrl)
 
-        const templateHtml = await fs.readFile(templatePath, 'utf-8')
+        const templateHtml = applySkinAliasStyles(
+            await fs.readFile(templatePath, 'utf-8'),
+            skin
+        )
         const filledHtml = renderTemplate(templateHtml, {
             avatar: dynamicAvatarBase64,
             username,
@@ -532,7 +535,11 @@ export class RendererService extends Service {
             evidence: formatEvidence(data.evidence),
             theme,
             dynamicAvatarUrl: dynamicAvatarBase64
-        })
+        }).replace(
+            /<body([^>]*)>/,
+            (_match, attrs) =>
+                `<body${attrs} data-skin="${skin}" data-report="persona">`
+        )
 
         await fs.writeFile(outTemplateHtmlPath, filledHtml)
 

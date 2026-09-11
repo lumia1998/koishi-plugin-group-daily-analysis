@@ -9,6 +9,7 @@ import { Config } from '../config'
 import type { GroupMessageFetchFilter, MessageFilter } from '../types'
 
 export const inject = {
+    chatluna: { required: true },
     chatluna_group_analysis: {
         required: true
     },
@@ -18,6 +19,7 @@ export const inject = {
 }
 
 export function apply(ctx: Context, config: Config) {
+    if (!config.registerTools) return
     const plugin = new ChatLunaPlugin(
         ctx,
         config as unknown as ChatLunaPlugin.Config,
@@ -44,7 +46,7 @@ export function apply(ctx: Context, config: Config) {
                 return true
             },
             createTool() {
-                return new GroupUserPersonaTool(ctx)
+                return new GroupUserPersonaTool(ctx, config)
             }
         })
     })
@@ -58,7 +60,7 @@ class GroupMessageFetchTool extends StructuredTool {
     schema = groupMessageFetchSchema
 
     description =
-        'Fetch historical messages for the current group or a specified scope. Provide natural English expressions for startTime/endTime such as "1 hour ago", "yesterday", or "now". The result contains the matching messages in JSON format.'
+        'Fetch historical messages for analysis of the current group/channel. This tool returns messages as JSON; it does not generate or send a report. Provide natural English startTime/endTime such as "1 hour ago", "yesterday", or "now".'
 
     constructor(private readonly ctx: Context) {
         super({})
@@ -69,10 +71,12 @@ class GroupMessageFetchTool extends StructuredTool {
         _runManager: unknown,
         runnable: ChatLunaToolRunnable
     ) {
-        const session = runnable.configurable.session
+        const session = runnable?.configurable?.session
         if (!session) {
             return 'Session context is unavailable; cannot fetch group messages.'
         }
+        if (session.isDirect || (!session.guildId && !session.channelId))
+            return 'This tool requires a group/channel session; private messages are not supported.'
 
         try {
             const rawFilter = input.filter ?? {}
@@ -95,6 +99,7 @@ class GroupMessageFetchTool extends StructuredTool {
             const response = {
                 count: messages.length,
                 filter: {
+                    platform: filter.platform,
                     guildId: filter.guildId,
                     channelId: filter.channelId,
                     userId: filter.userId ? String(filter.userId) : undefined,
@@ -130,11 +135,12 @@ class GroupMessageFetchTool extends StructuredTool {
         session: Session
     ): MessageFilter {
         const filter: MessageFilter = {
-            guildId: raw.guildId ?? session.guildId,
-            channelId: raw.channelId ?? session.channelId,
+            platform: session.platform,
+            guildId: session.guildId,
+            channelId: session.channelId,
             userId: raw.userId,
             selfId: session.selfId,
-            limit: raw.limit,
+            limit: raw.limit ?? MAX_FETCH_LIMIT,
             offset: raw.offset,
             purpose: 'general'
         }
@@ -202,12 +208,17 @@ const groupMessageFilterSchema = z
             ),
         limit: z
             .number()
+            .int()
+            .min(1)
+            .max(MAX_FETCH_LIMIT)
             .optional()
             .describe(
                 `Maximum number of messages to retrieve (1-${MAX_FETCH_LIMIT}). Defaults to the service setting.`
             ),
         offset: z
             .number()
+            .int()
+            .min(0)
             .optional()
             .describe(
                 'Offset for pagination when reading from the persisted database store.'
@@ -237,7 +248,10 @@ class GroupUserPersonaTool extends StructuredTool {
     description =
         'Retrieve the stored persona profile for a specific user ID within the current bot instance.'
 
-    constructor(private readonly ctx: Context) {
+    constructor(
+        private readonly ctx: Context,
+        private readonly config: Config
+    ) {
         super({})
     }
 
@@ -246,7 +260,7 @@ class GroupUserPersonaTool extends StructuredTool {
         _runManager: unknown,
         runnable: ChatLunaToolRunnable
     ) {
-        const session = runnable.configurable.session as Session | undefined
+        const session = runnable?.configurable?.session as Session | undefined
         if (!session) {
             return 'Session context is unavailable; cannot look up user persona.'
         }
@@ -254,8 +268,7 @@ class GroupUserPersonaTool extends StructuredTool {
         const userId = input.user_id
 
         // Check if user is in personaUserFilter
-        const config = this.ctx.config as Config
-        if (config.personaUserFilter.includes(userId)) {
+        if (this.config.personaUserFilter.includes(userId)) {
             return `User ${userId} is in the persona filter list and cannot be analyzed.`
         }
 

@@ -24,7 +24,24 @@ async function main() {
         totalChars: 32100,
         emojiCount: 215,
         mostActivePeriod: '20:00–21:00',
-        userStats: [],
+        userStats: [
+            {
+                userId: 'test',
+                nickname: '活跃群友',
+                messageCount: 123,
+                charCount: 2500,
+                lastActive: new Date(),
+                replyCount: 12,
+                replyRatio: 0.1,
+                emojiRatio: 0.2,
+                atCount: 5,
+                emojiStats: {},
+                nightRatio: 0.1,
+                avgChars: 20,
+                nightMessages: 12,
+                activeHours: { 12: 123 }
+            }
+        ],
         topics: Array.from({ length: 3 }, (_, i) => ({
             topic: `话题 ${i + 1}：模型体验与群友日常讨论`,
             detail: '这是一段用于检查多行文字换行的讨论详情。'.repeat(6),
@@ -193,6 +210,134 @@ async function main() {
             path.join(output, 'results.json'),
             JSON.stringify(results, null, 2)
         )
+        const personaResults: any[] = []
+        for (const skin of skinRegistry.getAllIds()) {
+            for (const theme of ['light', 'dark'] as const) {
+                const cleanup: Function[] = []
+                const config = Config({ skin, theme })
+                const avatar =
+                    'data:image/svg+xml;base64,' +
+                    Buffer.from(
+                        '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="128" height="128" fill="#c6daee"/><circle cx="64" cy="48" r="24" fill="#6487aa"/><ellipse cx="64" cy="112" rx="40" ry="35" fill="#6487aa"/></svg>'
+                    ).toString('base64')
+                const renderer: any = Object.assign(
+                    Object.create(RendererService.prototype),
+                    {
+                        config,
+                        templateDir: path.resolve('resources'),
+                        imageToBase64: async () => avatar,
+                        ctx: {
+                            baseDir: process.cwd(),
+                            logger: { info() {}, debug() {}, warn() {} },
+                            setTimeout(fn: Function) {
+                                cleanup.push(fn)
+                            },
+                            puppeteer: {
+                                async page() {
+                                    const page = await browser.newPage()
+                                    await page.setViewport({
+                                        width: 1200,
+                                        height: 900
+                                    })
+                                    await page.setRequestInterception(true)
+                                    page.on('request', (request: any) =>
+                                        /^https?:/.test(request.url())
+                                            ? request.abort()
+                                            : request.continue()
+                                    )
+                                    return page
+                                }
+                            }
+                        }
+                    }
+                )
+                const persona = {
+                    userId: 'test',
+                    username: '测试用户',
+                    analysisDate: '2026-09-12',
+                    summary:
+                        '这是一段多行用户画像摘要，用于检查长内容是否被截断、挤压或溢出。'.repeat(
+                            10
+                        ),
+                    keyTraits: [
+                        '积极交流',
+                        '善于分析',
+                        '这是一个特别长的性格特质标签用来检查自动换行'
+                    ],
+                    interests: [
+                        '技术讨论',
+                        '阅读与写作',
+                        'https://example.com/' + 'a'.repeat(90)
+                    ],
+                    communicationStyle:
+                        '表达直接并且重视依据，也会通过举例帮助群友理解问题。'.repeat(
+                            10
+                        ),
+                    evidence: Array.from({ length: 4 }, (_, i) =>
+                        `依据 ${i + 1}：这是一段应完整展示的引用内容。`.repeat(
+                            6
+                        )
+                    )
+                }
+                const page = await renderer._renderUserPersonaUnsafe(
+                    persona,
+                    '很长的用户昵称用于验证换行布局'.repeat(3),
+                    avatar,
+                    theme
+                )
+                try {
+                    const metrics = await page.evaluate(() => ({
+                        pageOverflow:
+                            document.documentElement.scrollWidth >
+                            window.innerWidth + 3,
+                        skin: document.body.dataset.skin,
+                        unresolved: document.body.innerText.includes('${'),
+                        overflow: [
+                            ...document.querySelectorAll(
+                                'p, h1, .profile-name, .chip, .tag, .washi-tape-tag'
+                            )
+                        ]
+                            .filter(
+                                (el) =>
+                                    (el as HTMLElement).clientWidth > 0 &&
+                                    (el as HTMLElement).scrollWidth >
+                                        (el as HTMLElement).clientWidth + 3
+                            )
+                            .map((el) => el.className || el.tagName)
+                    }))
+                    await page.screenshot({
+                        path: path.join(output, `persona-${skin}-${theme}.png`),
+                        fullPage: true
+                    })
+                    assert.equal(metrics.skin, skin)
+                    assert.equal(metrics.unresolved, false)
+                    assert.equal(
+                        metrics.pageOverflow,
+                        false,
+                        `${skin}/${theme}: persona exceeds page width`
+                    )
+                    assert.deepEqual(
+                        metrics.overflow,
+                        [],
+                        `${skin}/${theme}: persona text overflow`
+                    )
+                    personaResults.push({ skin, theme, ...metrics })
+                } finally {
+                    await page.close()
+                    for (const fn of cleanup) await fn()
+                }
+            }
+        }
+        await fs.writeFile(
+            path.join(output, 'persona-results.json'),
+            JSON.stringify(personaResults, null, 2)
+        )
+        console.log(
+            'Persona layout overflows:',
+            JSON.stringify(
+                personaResults.filter((item) => item.overflow.length)
+            )
+        )
         for (const theme of ['light', 'dark']) {
             const contact = await browser.newPage()
             await contact.setViewport({ width: 1600, height: 900 })
@@ -214,7 +359,7 @@ async function main() {
             await contact.close()
         }
         console.log(
-            `Report layouts passed: ${results.length} renders. ${output}`
+            `Report layouts passed: ${results.length} group + ${personaResults.length} persona renders. ${output}`
         )
     } finally {
         await browser.close()
