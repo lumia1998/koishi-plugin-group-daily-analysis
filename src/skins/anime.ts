@@ -109,7 +109,7 @@ export class AnimeSkinRenderer implements SkinRenderer {
             if (count > 0 && barHeight < 10) {
                 barHeight = 10 // Min height for visibility
             }
-            
+
             chartBars.push(`
                     <div class="chart-bar-group" title="${i}:00 - ${count} 条消息">
                         <div class="chart-bar" style="height: ${barHeight}%;"></div>
@@ -130,9 +130,7 @@ export class AnimeSkinRenderer implements SkinRenderer {
             return '<div class="empty-state">暂无数据</div>'
         }
 
-        return tags
-            .map((tag) => `<span class="tag">${tag}</span>`)
-            .join('')
+        return tags.map((tag) => `<span class="tag">${tag}</span>`).join('')
     }
 
     formatEvidence(items: string[] | '无' | undefined): string {

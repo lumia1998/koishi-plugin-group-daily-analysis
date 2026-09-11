@@ -1,4 +1,4 @@
-import { GroupAnalysisResult, UserPersonaProfile, UserStats, SummaryTopic } from '../types'
+import { GroupAnalysisResult, UserPersonaProfile, UserStats } from '../types'
 
 /**
  * Skin renderer interface

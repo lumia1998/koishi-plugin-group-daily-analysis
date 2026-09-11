@@ -12,6 +12,36 @@ import { LLMService } from '../src/service/llm'
 import { apply, todayWindow } from '../src/plugins/comic'
 import { listModels } from '../src/models'
 import { createTrace, errorKind } from '../src/diagnostics'
+import {
+    buildStoryboardPrompt,
+    buildComicImagePrompt
+} from '../src/comic-prompts'
+
+test('comic prompts inject persona and enforce reference identity without guessing appearance', () => {
+    const config = Config({}).comic
+    const topics = [{ topic: 'test', detail: 'details', contributors: [] }]
+    let prompt = buildStoryboardPrompt(config, topics, true)
+    assert.ok(prompt.includes('不得猜测'))
+    assert.ok(prompt.includes('全部 1 个话题'))
+    config.characterDescription = '灰发猫耳，草帽白裙，温柔俏皮'
+    prompt = buildStoryboardPrompt(config, topics, true)
+    assert.ok(prompt.includes(config.characterDescription))
+    assert.ok(prompt.includes('每格都必须出现同一个主角'))
+    const imagePrompt = buildComicImagePrompt(
+        'a black-haired male protagonist',
+        config,
+        true
+    )
+    assert.ok(
+        imagePrompt.includes('MUST be ignored in favor of the reference image')
+    )
+    assert.ok(imagePrompt.includes(config.characterDescription))
+    assert.ok(
+        !buildComicImagePrompt('scene', config, false).includes(
+            'attached image'
+        )
+    )
+})
 
 const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
@@ -30,6 +60,9 @@ test('schema supplies nested API and disabled-comic defaults', () => {
     assert.equal(config.comic.enabled, false)
     assert.equal(config.comic.maxTopics, 3)
     assert.equal(config.debug, false)
+    assert.equal(config.chatQualityAnalysis, true)
+    assert.deepEqual(config.cronOutputFormats, [])
+    assert.equal(config.incrementalEnabled, false)
 })
 
 test('detailed logging is opt-in and API traces omit secrets and bodies', async (t) => {
@@ -160,7 +193,7 @@ test('all text protocols send and extract their native wire formats', async (t) 
                 assert.equal(body.store, false)
             }
             if (protocol === 'anthropic-messages') {
-                assert.equal(body.max_tokens, 8192)
+                assert.equal(body.max_tokens, 32768)
                 assert.equal(headers.get('x-api-key'), 'test-key')
             }
             if (protocol === 'google-v1beta')
@@ -308,8 +341,8 @@ test('LLM service parses plain JSON and fenced YAML without ChatLuna', async (t)
         config
     }) as LLMService
     for (const output of [
-        '[{"topic":"test"}]',
-        '```yaml\n- topic: test\n```'
+        '[{"topic":"test","detail":"details","contributors":[]}]',
+        '```yaml\n- topic: test\n  detail: details\n  contributors: []\n```'
     ]) {
         t.mock.method(globalThis, 'fetch', async () =>
             json({
@@ -322,7 +355,7 @@ test('LLM service parses plain JSON and fenced YAML without ChatLuna', async (t)
             })
         )
         assert.deepEqual(await service.summarizeTopics('messages'), [
-            { topic: 'test' }
+            { topic: 'test', detail: 'details', contributors: [] }
         ])
         t.mock.restoreAll()
     }
@@ -359,7 +392,7 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
             }
         ],
         command(name: string, _description: string, options: any) {
-            assert.equal(name, '群漫画')
+            assert.equal(name, '群漫画 [days:number]')
             assert.equal(options.checkArgCount, true)
             return {
                 alias() {
@@ -461,6 +494,23 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
     assert.equal(calls, 3)
     await events['group-daily-analysis/auto-comic'](group)
     assert.equal(calls, 3, 'scheduled comics share the cooldown')
+    ctx.chatluna_group_analysis_message.getHistoricalMessages = async () => {
+        throw new Error('reused topics must not fetch current-day history')
+    }
+    await events['group-daily-analysis/auto-comic']({
+        group: { ...group, channelId: 'reused', guildId: 'reused' },
+        topics: [{ topic: 'test', detail: 'topic details', contributors: [] }]
+    })
+    assert.equal(calls, 4)
+    await events['group-daily-analysis/auto-comic']({
+        group: { ...group, channelId: 'empty', guildId: 'empty' },
+        topics: []
+    })
+    assert.equal(
+        calls,
+        4,
+        'disabled or empty topic module must not start paid generation'
+    )
 })
 
 test('comic window always starts at local midnight', () => {

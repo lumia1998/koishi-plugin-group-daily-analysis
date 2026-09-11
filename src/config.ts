@@ -9,6 +9,15 @@ export interface GroupListener {
     enabled: boolean
 }
 
+export type GroupListMode = 'inherit' | 'whitelist' | 'blacklist'
+
+export interface ComicCharacterProfile {
+    name: string
+    enabled: boolean
+    description: string
+    referenceImages: string[]
+}
+
 const GroupListener: Schema<GroupListener> = Schema.object({
     platform: Schema.string().required().description('平台名称'),
     selfId: Schema.string().required().description('机器人 ID'),
@@ -18,23 +27,34 @@ const GroupListener: Schema<GroupListener> = Schema.object({
 })
 
 export interface Config {
+    preset: string
     llm: ApiConfig
     comic: {
         enabled: boolean
         autoSend: boolean
+        groupMode: GroupListMode
+        groups: string[]
         protocol: 'openai-images' | 'google-v1beta'
         baseUrl: string
         apiKey: string
         model: string
         referenceImage: string
+        referenceImages: string[]
+        characters: ComicCharacterProfile[]
+        randomCharacterDaily: boolean
+        characterDescription: string
         prompt: string
         timeout: number
         maxTopics: number
         cooldown: number
         size: string
+        presetMode: 'inherit' | 'none' | 'custom'
+        preset: string
     }
     enableAllGroupsByDefault: boolean
     listenerGroups: GroupListener[]
+    autoAnalysisGroupMode: GroupListMode
+    autoAnalysisGroups: string[]
     wordsFilter: string[]
     userFilter: string[]
     personaUserFilter: string[]
@@ -46,7 +66,12 @@ export interface Config {
     promptUserPersona: string
     promptQueryParser: string
     promptQueryChat: string
-    outputFormat: 'image' | 'pdf' | 'text'
+    outputFormat: 'image' | 'pdf' | 'text' | 'html'
+    cronOutputFormats: ('image' | 'pdf' | 'text' | 'html')[]
+    htmlOutputDir: string
+    htmlBaseUrl: string
+    uploadGroupFile: boolean
+    uploadGroupAlbum: boolean
     maxMessages: number
     temperature: number
     minMessages: number
@@ -55,6 +80,19 @@ export interface Config {
     maxGoldenQuotes: number
     maxUsersInReport: number
     userTitleAnalysis: boolean
+    topicAnalysis: boolean
+    goldenQuoteAnalysis: boolean
+    chatQualityAnalysis: boolean
+    promptChatQuality: string
+    incrementalEnabled: boolean
+    incrementalBatchSize: number
+    incrementalWindowHours: number
+    incrementalFallbackFull: boolean
+    incrementalImmediateReport: boolean
+    maxConcurrentTasks: number
+    maxConcurrentLLM: number
+    maxConcurrentRender: number
+    checkpointEnabled: boolean
     groupAnalysisCacheMinutes: number
     cronSchedule: string
     autoAnalysisCooldown: number
@@ -88,6 +126,19 @@ export const Config: Schema<Config> = Schema.intersect([
             .role('table')
             .description('数据库监听规则列表。')
             .default([]),
+        autoAnalysisGroupMode: Schema.union([
+            Schema.const('inherit').description('继承基础监听群组'),
+            Schema.const('whitelist').description('仅分析列表中的群组'),
+            Schema.const('blacklist').description('排除列表中的群组')
+        ])
+            .default('inherit')
+            .description(
+                '定时分析目标与消息监听分开配置；inherit 保持现有监听群组行为。'
+            ),
+        autoAnalysisGroups: Schema.array(String)
+            .role('table')
+            .default([])
+            .description('定时分析群组 ID 列表；可填写群号或频道号。'),
         cronSchedule: Schema.string().description(
             '定时发送分析报告的 CRON 表达式。留空则禁用。例如 "0 22 * * *" 表示每天22点。'
         ),
@@ -137,6 +188,40 @@ export const Config: Schema<Config> = Schema.intersect([
         userTitleAnalysis: Schema.boolean()
             .description('是否启用用户称号分析（需要消耗更多 Token）。')
             .default(true),
+        topicAnalysis: Schema.boolean()
+            .default(true)
+            .description('是否启用热门话题模块。'),
+        goldenQuoteAnalysis: Schema.boolean()
+            .default(true)
+            .description('是否启用金句模块。'),
+        chatQualityAnalysis: Schema.boolean()
+            .default(true)
+            .description(
+                '是否启用聊天质量锐评（主题、维度占比、点评与总评）。'
+            ),
+        incrementalEnabled: Schema.boolean()
+            .default(false)
+            .description(
+                '按消息数触发增量批次分析；关闭时保持原有定时全量分析。'
+            ),
+        incrementalBatchSize: Schema.number().min(1).max(1000).default(100),
+        incrementalWindowHours: Schema.number().min(1).max(168).default(24),
+        incrementalFallbackFull: Schema.boolean()
+            .default(true)
+            .description(
+                '增量分析失败或超过消息上限时，尝试当前窗口的全量分析；仍受 maxMessages 限制。消息总数不足时保留待处理计数。'
+            ),
+        incrementalImmediateReport: Schema.boolean()
+            .default(false)
+            .description('增量批次完成后立即发送一次报告。'),
+        maxConcurrentTasks: Schema.number().min(1).max(32).default(3),
+        maxConcurrentLLM: Schema.number().min(1).max(32).default(4),
+        maxConcurrentRender: Schema.number().min(1).max(16).default(2),
+        checkpointEnabled: Schema.boolean()
+            .default(true)
+            .description(
+                '保存固定时间范围和分析结果；重启后恢复未结束任务。已有结果直接重绘发送，未完成分析则重跑文本分析；不会重试付费漫画。'
+            ),
         groupAnalysisCacheMinutes: Schema.number()
             .description('群分析缓存结果的保留分钟数。超过此时长后会重新分析。')
             .min(0)
@@ -163,10 +248,34 @@ export const Config: Schema<Config> = Schema.intersect([
         outputFormat: Schema.union([
             Schema.const('image').description('图片'),
             Schema.const('pdf').description('PDF'),
-            Schema.const('text').description('文本')
+            Schema.const('text').description('文本'),
+            Schema.const('html').description('HTML 文件')
         ])
             .description('默认输出格式。')
             .default('image'),
+        cronOutputFormats: Schema.array(
+            Schema.union([
+                Schema.const('image'),
+                Schema.const('pdf'),
+                Schema.const('text'),
+                Schema.const('html')
+            ])
+        )
+            .role('table')
+            .default([])
+            .description('定时分析输出格式；留空时使用默认输出格式。'),
+        htmlOutputDir: Schema.string()
+            .default('data/chatluna/group_analysis/reports')
+            .description('HTML 报告保存目录（相对于 Koishi 工作目录）。'),
+        htmlBaseUrl: Schema.string()
+            .default('')
+            .description('HTML 报告外链前缀；留空时发送本地文件路径。'),
+        uploadGroupFile: Schema.boolean()
+            .default(false)
+            .description('在 OneBot 支持时尝试把报告归档到群文件。'),
+        uploadGroupAlbum: Schema.boolean()
+            .default(false)
+            .description('在平台提供相册接口时尝试归档图片。'),
         theme: Schema.union([
             Schema.const('light').description('亮色主题'),
             Schema.const('dark').description('暗色主题'),
@@ -181,11 +290,35 @@ export const Config: Schema<Config> = Schema.intersect([
             Schema.const('anime').description('二次元风格'),
             Schema.const('newspaper').description('报纸风格'),
             Schema.const('art').description('艺术风格'),
-            Schema.const('scrapbook').description('手账风格')
+            Schema.const('scrapbook').description('手账风格'),
+            Schema.const('simple').description('简洁（MD3 兼容别名）'),
+            Schema.const('ATRI').description('ATRI（二次元兼容别名）'),
+            Schema.const('BlueArchive').description(
+                'Blue Archive（二次元兼容别名）'
+            ),
+            Schema.const('retro_futurism').description(
+                '复古未来（报纸兼容别名）'
+            ),
+            Schema.const('art_nouveau').description('新艺术（艺术兼容别名）'),
+            Schema.const('spring_festival').description('节日（手账兼容别名）'),
+            Schema.const('HatsuneMiku').description(
+                '初音未来（二次元兼容别名）'
+            ),
+            Schema.const('hack').description('终端（报纸兼容别名）')
         ])
             .description('渲染界面皮肤。')
             .default('md3')
     }).description('分析渲染设置'),
+    Schema.object({
+        preset: Schema.union([
+            Schema.const('').description('不使用预设'),
+            Schema.dynamic('preset')
+        ])
+            .default('')
+            .description(
+                'ChatLuna 预设。用于话题、称号、金句、用户画像和分析后对话；查询时间解析保持独立。预设在 ChatLuna 中导入或编辑，保存后下次分析读取最新内容。'
+            )
+    }).description('ChatLuna 预设'),
     Schema.object({
         temperature: Schema.number()
             .description('生成的温度。')
@@ -208,22 +341,84 @@ export const Config: Schema<Config> = Schema.intersect([
             model: Schema.dynamic('group-daily-analysis.text-model')
                 .default('')
                 .description(
-                    '从自动获取的列表选择文本模型；群分析、查询和漫画分镜共用。接口不提供模型列表时可手动填写 ID。'
+                    '从自动获取的列表选择文本模型；各模块可在下方单独覆盖。接口不提供模型列表时可手动填写 ID。'
                 ),
+            retryCount: Schema.number()
+                .min(0)
+                .max(5)
+                .default(2)
+                .description('文本 API 失败后的重试次数。'),
+            retryBackoffSeconds: Schema.number()
+                .min(0)
+                .max(60)
+                .default(1)
+                .description('文本 API 重试退避秒数。'),
+            topicModel: Schema.dynamic('group-daily-analysis.text-model')
+                .default('')
+                .description('话题分析专用模型，留空继承主模型。'),
+            titleModel: Schema.dynamic('group-daily-analysis.text-model')
+                .default('')
+                .description('用户称号专用模型，留空继承主模型。'),
+            goldenQuoteModel: Schema.dynamic('group-daily-analysis.text-model')
+                .default('')
+                .description('金句分析专用模型，留空继承主模型。'),
+            qualityModel: Schema.dynamic('group-daily-analysis.text-model')
+                .default('')
+                .description('聊天质量锐评专用模型，留空继承主模型。'),
+            personaModel: Schema.dynamic('group-daily-analysis.text-model')
+                .default('')
+                .description('用户画像专用模型，留空继承主模型。'),
+            queryModel: Schema.dynamic('group-daily-analysis.text-model')
+                .default('')
+                .description('查询解析专用模型，留空继承主模型。'),
+            chatModel: Schema.dynamic('group-daily-analysis.text-model')
+                .default('')
+                .description('查询对话专用模型，留空继承主模型。'),
+            comicModel: Schema.dynamic('group-daily-analysis.text-model')
+                .default('')
+                .description('漫画分镜专用模型，留空继承主模型。'),
             timeout: Schema.number()
                 .min(1)
                 .max(600)
                 .default(120)
                 .description('请求超时（秒）。'),
-            maxOutputTokens: Schema.number().min(1).default(8192)
+            maxOutputTokens: Schema.number().min(1).default(32768)
         }),
         comic: Schema.object({
             enabled: Schema.boolean().default(false),
+            presetMode: Schema.union([
+                Schema.const('inherit').description('继承日报预设'),
+                Schema.const('none').description('不使用预设'),
+                Schema.const('custom').description('指定漫画预设')
+            ])
+                .default('inherit')
+                .description(
+                    '漫画分镜的人格来源。角色描述与参考图仍决定主角外观。'
+                ),
+            preset: Schema.union([
+                Schema.const('').description('未选择'),
+                Schema.dynamic('preset')
+            ])
+                .default('')
+                .description(
+                    '选择“指定漫画预设”时使用。读取 ChatLuna 已导入的预设。'
+                ),
             autoSend: Schema.boolean()
                 .default(false)
                 .description(
                     '定时群分析报告发送后，同时生成并发送当天群漫画。需要启用漫画功能。'
                 ),
+            groupMode: Schema.union([
+                Schema.const('inherit').description('继承分析群组权限'),
+                Schema.const('whitelist').description('仅允许列表中的群组'),
+                Schema.const('blacklist').description('排除列表中的群组')
+            ])
+                .default('inherit')
+                .description('漫画权限与定时分析权限独立。'),
+            groups: Schema.array(String)
+                .role('table')
+                .default([])
+                .description('漫画群组 ID 列表。'),
             protocol: Schema.union(['openai-images', 'google-v1beta']).default(
                 'google-v1beta'
             ),
@@ -239,6 +434,46 @@ export const Config: Schema<Config> = Schema.intersect([
             referenceImage: Schema.path({ filters: ['file'] }).description(
                 '点击选择 Koishi 所在机器上的角色三视图（PNG、JPEG 或 WebP，最大 20MB）；留空不使用参考图。'
             ),
+            referenceImages: Schema.array(Schema.path({ filters: ['file'] }))
+                .role('table')
+                .default([])
+                .description(
+                    '可选的多张角色参考图（PNG、JPEG 或 WebP，每张最大 20MB）。会与旧版 referenceImage 合并发送。'
+                ),
+            characters: Schema.array(
+                Schema.object({
+                    name: Schema.string()
+                        .required()
+                        .description('角色方案名称'),
+                    enabled: Schema.boolean()
+                        .default(true)
+                        .description('是否启用'),
+                    description: Schema.string()
+                        .role('textarea')
+                        .default('')
+                        .description('角色外观、服装、性格和口吻'),
+                    referenceImages: Schema.array(
+                        Schema.path({ filters: ['file'] })
+                    )
+                        .role('table')
+                        .default([])
+                        .description('该角色参考图')
+                })
+            )
+                .role('table')
+                .default([])
+                .description('漫画角色方案。为空时使用全局角色描述和参考图。'),
+            randomCharacterDaily: Schema.boolean()
+                .default(false)
+                .description(
+                    '每天首次生成漫画时随机选一个启用角色，并在当天保持一致。'
+                ),
+            characterDescription: Schema.string()
+                .role('textarea')
+                .default('')
+                .description(
+                    '漫画主角的外观、服装、性格和说话方式。分镜模型不会看到参考图，请在这里描述角色；每格都使用此角色，外观冲突时以参考图为准。'
+                ),
             timeout: Schema.number().min(1).max(600).default(300),
             maxTopics: Schema.number().min(1).max(6).step(1).default(3),
             cooldown: Schema.number()
@@ -438,8 +673,22 @@ export const Config: Schema<Config> = Schema.intersect([
     - "直接复制上面聊天记录中的原文"（加入多条组成数组，引用到的聊天消息或者你自己挑选的逆天语句）
   lastMergedFromHistory: true/false（是否成功融合历史画像）
 \`\`\``
-            )
-    }).description('高级设置'),
+            ),
+        promptChatQuality: Schema.string()
+            .description('聊天质量锐评提示词模板。')
+            .role('textarea')
+            .default(`你是群聊质量分析师。请根据以下群聊记录给出质量画像：一个简短主题、一个副标题、3-6 个维度及其百分比（总和 100）和点评，以及一段总评。维度可以是信息密度、互动性、幽默度、冲突度、建设性等，必须以聊天记录为依据，不要编造。仅返回 YAML：
+title: "主题"
+subtitle: "副标题"
+dimensions:
+  - name: "互动性"
+    percentage: 40
+    comment: "点评"
+summary: "总评"
+
+群聊记录：
+{messages}`)
+    }).description('分析提示词'),
     Schema.object({
         promptQueryParser: Schema.string()
             .description('群分析自然语言解析提示词模板。')
@@ -525,7 +774,7 @@ targetTime:
 3. 回复简洁、中立，不要输出 YAML 或 markdown 代码块。
 `
             )
-    }).description('高级设置')
+    }).description('查询与对话提示词')
 ])
 
 export const name = 'group-analysis'

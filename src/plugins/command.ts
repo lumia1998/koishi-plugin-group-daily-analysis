@@ -1,7 +1,12 @@
-/* eslint-disable max-len */
-import { Context, Session, User } from 'koishi'
+/* eslint-disable max-len, @typescript-eslint/no-explicit-any */
+import { Context, h, Session, User } from 'koishi'
 import { Config } from '../config'
-import { shouldListenToMessage } from '../utils'
+import { generateTextReport, shouldListenToMessage } from '../utils'
+import { skinRegistry } from '../skins'
+import {
+    generateQQOfficialMarkdown,
+    isQQOfficialPlatform
+} from '../service/platform-report'
 
 export const inject = {
     chatluna_group_analysis: {
@@ -51,7 +56,9 @@ export function apply(ctx: Context, config: Config) {
 
             const targetGuildId = options.group ?? session.guildId ?? undefined
             const targetChannelId =
-                options.channel ?? session.channelId ?? undefined
+                options.channel ??
+                (options.group ? undefined : session.channelId) ??
+                undefined
 
             if (!targetGuildId && !targetChannelId) {
                 return '请使用 -g 或 -c 指定目标群或频道。'
@@ -74,7 +81,8 @@ export function apply(ctx: Context, config: Config) {
                         session,
                         {
                             guildId: targetGuildId || undefined,
-                            channelId: targetChannelId || undefined
+                            channelId: targetChannelId || undefined,
+                            platform: session.platform
                         },
                         queryText
                     )
@@ -87,7 +95,8 @@ export function apply(ctx: Context, config: Config) {
                         session.selfId,
                         {
                             guildId: targetGuildId || undefined,
-                            channelId: targetChannelId || undefined
+                            channelId: targetChannelId || undefined,
+                            platform: session.platform
                         },
                         analysisDays,
                         undefined,
@@ -98,6 +107,121 @@ export function apply(ctx: Context, config: Config) {
                 ctx.logger.error('执行分析时发生未捕获的错误:', err)
                 return '群分析执行失败，请检查日志。'
             }
+        })
+
+    const historyScope = (session: Session) => ({
+        platform: session.platform,
+        selfId: session.selfId,
+        ...(session.channelId
+            ? { channelId: session.channelId }
+            : { guildId: session.guildId })
+    })
+    ctx.command('群分析.历史 [count:number]', '查看最近的历史分析报告', {
+        authority: 2
+    })
+        .alias('group-analysis.history')
+        .action(async ({ session }, count) => {
+            if (session.isDirect) return '请在目标群聊中查看历史报告。'
+            if (!checkGroup(session)) return '本群未启用分析功能。'
+            const rows = await ctx.database
+                .select('chatluna_analysis_reports')
+                .where(historyScope(session))
+                .orderBy(($: any) => $.createdAt, 'desc')
+                .limit(Math.max(1, Math.min(20, Number(count) || 5)))
+                .execute()
+            if (!rows.length) return '暂无历史分析报告。'
+            return rows
+                .map(
+                    (row: any) =>
+                        `${row.id} | ${row.createdAt?.toLocaleString?.() || row.createdAt} | ${row.format} | ${row.status || '已保存'}`
+                )
+                .join('\n')
+        })
+
+    ctx.command(
+        '群分析.重绘 [reportId:text]',
+        '使用已保存结果重新渲染报告（不调用 Token）',
+        { authority: 2 }
+    )
+        .alias('group-analysis.redraw')
+        .option('format', '-f <format:string> 输出 image/pdf/text/html')
+        .action(async ({ session, options }, reportId) => {
+            if (session.isDirect) return '请在目标群聊中重绘历史报告。'
+            if (!checkGroup(session)) return '本群未启用分析功能。'
+            const rows = await ctx.database
+                .select('chatluna_analysis_reports')
+                .where({
+                    ...historyScope(session),
+                    ...(reportId ? { id: reportId } : {})
+                })
+                .orderBy(($: any) => $.createdAt, 'desc')
+                .limit(1)
+                .execute()
+            const row: any = reportId
+                ? rows.find((item: any) => item.id === reportId)
+                : rows[0]
+            if (!row) return '找不到历史分析报告。'
+            let result: any
+            try {
+                result = JSON.parse(row.result)
+            } catch {
+                return '历史报告数据损坏。'
+            }
+            const format =
+                (options as any)?.format ||
+                (row.format === 'incremental' ? 'text' : row.format) ||
+                config.outputFormat
+            if (
+                (options as any)?.format &&
+                !['image', 'pdf', 'text', 'html'].includes(format)
+            )
+                return '输出格式必须是 image、pdf、text 或 html。'
+            if (format === 'html') {
+                const file =
+                    await ctx.chatluna_group_analysis_renderer.renderGroupAnalysisHtml(
+                        result,
+                        config
+                    )
+                return config.htmlBaseUrl
+                    ? `${config.htmlBaseUrl.replace(/\/$/, '')}/${file.split(/[\\/]/).pop()}`
+                    : `HTML 报告已保存：${file}`
+            }
+            if (format === 'pdf') {
+                const pdf =
+                    await ctx.chatluna_group_analysis_renderer.renderGroupAnalysisToPdf(
+                        result
+                    )
+                return pdf ? h.file(pdf, 'application/pdf') : 'PDF 渲染失败。'
+            }
+            if (format === 'text')
+                return isQQOfficialPlatform(row.platform)
+                    ? h('markdown', {
+                          content: generateQQOfficialMarkdown(result)
+                      })
+                    : generateTextReport(result)
+            const image =
+                await ctx.chatluna_group_analysis_renderer.renderGroupAnalysis(
+                    result,
+                    config
+                )
+            return typeof image === 'string'
+                ? image
+                : h.image(image, 'image/png')
+        })
+
+    ctx.command('群分析.主题 [skin:string]', '预览或切换报告主题', {
+        authority: 3
+    })
+        .alias('group-analysis.skin')
+        .action(async ({ session }, skin) => {
+            const ids = skinRegistry.getAllIds()
+            if (!skin)
+                return `当前主题：${config.skin || 'md3'}\n可用主题：${ids.join('、')}`
+            if (!skinRegistry.has(skin))
+                return `主题不存在。可用主题：${ids.join('、')}`
+            config.skin = skin
+            ctx.scope.parent.scope.parent.scope.update(config, true)
+            return `已切换报告主题为 ${skin}。可使用 群分析.重绘 预览最近报告。`
         })
 
     settings

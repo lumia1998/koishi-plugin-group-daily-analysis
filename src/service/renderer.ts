@@ -5,6 +5,7 @@ import { GroupAnalysisResult, UserPersonaProfile } from '../types'
 import { Config } from '../config'
 import { fileURLToPath } from 'url'
 import {
+    formatChatQuality,
     formatGoldenQuotes,
     formatTopics,
     formatUserStats,
@@ -12,18 +13,21 @@ import {
     generateActiveHoursChart,
     renderTemplate
 } from '../utils'
-import { skinRegistry } from '../skins'
+import { applySkinAliasStyles, skinRegistry, skinSourceMap } from '../skins'
+import { ConcurrencyLimiter } from './limiter'
 
 export class RendererService extends Service {
     static inject = ['puppeteer']
 
     templateDir: string
+    private readonly limiter: ConcurrencyLimiter
 
     constructor(
         ctx: Context,
         public config: Config
     ) {
         super(ctx, 'chatluna_group_analysis_renderer', true)
+        this.limiter = new ConcurrencyLimiter(config.maxConcurrentRender || 2)
 
         this.templateDir = path.resolve(
             ctx.baseDir,
@@ -37,7 +41,11 @@ export class RendererService extends Service {
 
     private getSkinPath(filename: string): string {
         const skin = this.config.skin || 'md3'
-        return path.resolve(this.templateDir, skin, filename)
+        return path.resolve(
+            this.templateDir,
+            skinSourceMap[skin] || skin,
+            filename
+        )
     }
 
     private async imageToBase64(url: string): Promise<string> {
@@ -77,9 +85,15 @@ export class RendererService extends Service {
         const skin = this.config.skin || 'md3'
 
         // Source: resources/md3 (or other skin)
-        const skinSourceDir = path.resolve(resourcesDir, skin)
+        const skinSourceDir = path.resolve(
+            resourcesDir,
+            skinSourceMap[skin] || skin
+        )
         // Destination: data/chatluna/group_analysis/md3
-        const skinDestDir = path.resolve(templateDir, skin)
+        const skinDestDir = path.resolve(
+            templateDir,
+            skinSourceMap[skin] || skin
+        )
 
         /* try {
             await fs.access(skinDestDir)
@@ -132,6 +146,14 @@ export class RendererService extends Service {
     public async renderGroupAnalysisToPdf(
         data: GroupAnalysisResult
     ): Promise<Buffer> {
+        return this.limiter.run(() =>
+            this.renderGroupAnalysisToPdfInternal(data)
+        )
+    }
+
+    private async renderGroupAnalysisToPdfInternal(
+        data: GroupAnalysisResult
+    ): Promise<Buffer> {
         let theme = this.config.theme
         if (theme === 'auto') {
             const hour = new Date().getHours()
@@ -140,13 +162,23 @@ export class RendererService extends Service {
 
         const page = await this._renderGroupAnalysis(data, theme)
 
-        const pdfBuffer = await page.pdf({ format: 'A4' })
-        await page.close()
-
-        return pdfBuffer
+        try {
+            return await page.pdf({ format: 'A4' })
+        } finally {
+            await page.close()
+        }
     }
 
     public async renderGroupAnalysis(
+        data: GroupAnalysisResult,
+        config: Config
+    ): Promise<Buffer | string> {
+        return this.limiter.run(() =>
+            this.renderGroupAnalysisInternal(data, config)
+        )
+    }
+
+    private async renderGroupAnalysisInternal(
         data: GroupAnalysisResult,
         config: Config
     ): Promise<Buffer | string> {
@@ -158,21 +190,24 @@ export class RendererService extends Service {
             }
 
             const page = await this._renderGroupAnalysis(data, theme)
+            try {
+                // 找到页面中的 container 元素
+                const renderer = skinRegistry.getSafe(config.skin || 'md3')
+                const selector = renderer.containerSelector
+                const element = await page.$(selector)
+                if (!element) {
+                    throw new Error(
+                        `无法在渲染的 HTML 中找到 ${selector} 元素。`
+                    )
+                }
 
-            // 找到页面中的 container 元素
-            const renderer = skinRegistry.getSafe(config.skin || 'md3')
-            const selector = renderer.containerSelector
-            const element = await page.$(selector)
-            if (!element) {
+                const imageBuffer = await element.screenshot({})
+
+                this.ctx.logger.info('图片渲染成功！')
+                return imageBuffer
+            } finally {
                 await page.close()
-                throw new Error(`无法在渲染的 HTML 中找到 ${selector} 元素。`)
             }
-
-            const imageBuffer = await element.screenshot({})
-            await page.close()
-
-            this.ctx.logger.info('图片渲染成功！')
-            return imageBuffer
         } catch (error) {
             this.ctx.logger.error('渲染报告图片时发生错误:', error)
             if (error instanceof Error) {
@@ -186,6 +221,13 @@ export class RendererService extends Service {
         data: GroupAnalysisResult,
         theme: 'light' | 'dark'
     ): Promise<Awaited<ReturnType<Context['puppeteer']['page']>>> {
+        return this._renderGroupAnalysisUnsafe(data, theme)
+    }
+
+    private async _renderGroupAnalysisUnsafe(
+        data: GroupAnalysisResult,
+        theme: 'light' | 'dark'
+    ): Promise<Awaited<ReturnType<Context['puppeteer']['page']>>> {
         // 检查 puppeteer 是否可用
         if (!this.ctx.puppeteer) {
             throw new Error('Puppeteer service is not available.')
@@ -196,7 +238,7 @@ export class RendererService extends Service {
         const skin = this.config.skin || 'md3'
         const outTemplateHtmlPath = path.resolve(
             this.templateDir,
-            skin,
+            skinSourceMap[skin] || skin,
             `${randomId}.html`
         )
 
@@ -209,7 +251,10 @@ export class RendererService extends Service {
         const dynamicAvatarBase64 = await this.imageToBase64(dynamicAvatarUrl)
 
         // 读取模板文件并替换占位符
-        const templateHtml = await fs.readFile(templatePath, 'utf-8')
+        const templateHtml = applySkinAliasStyles(
+            await fs.readFile(templatePath, 'utf-8'),
+            skin
+        )
         const filledHtml = renderTemplate(templateHtml, {
             groupName: data.groupName,
             analysisDate: data.analysisDate,
@@ -226,9 +271,13 @@ export class RendererService extends Service {
                 skin
             ),
             goldenQuotes: formatGoldenQuotes(data.goldenQuotes || [], skin),
+            chatQuality: formatChatQuality(data.chatQuality),
             theme,
             dynamicAvatarUrl: dynamicAvatarBase64
-        })
+        }).replace(
+            /<body([^>]*)>/,
+            (_match, attrs) => `<body${attrs} data-skin="${skin}">`
+        )
 
         // 写入临时 HTML 文件
         await fs.writeFile(outTemplateHtmlPath, filledHtml)
@@ -239,14 +288,19 @@ export class RendererService extends Service {
         const page = await this.ctx.puppeteer.page()
 
         // 重新加载页面并使用 goto 访问本地文件
-        await page.goto('file://' + outTemplateHtmlPath, {
-            waitUntil: 'domcontentloaded'
-        })
+        try {
+            await page.goto('file://' + outTemplateHtmlPath, {
+                waitUntil: 'domcontentloaded'
+            })
 
-        this.ctx.logger.info('网页加载完成，开始等待字体加载。')
+            this.ctx.logger.info('网页加载完成，开始等待字体加载。')
 
-        // 等待字体加载完成
-        await page.evaluate(() => document.fonts.ready)
+            // 等待字体加载完成
+            await page.evaluate(() => document.fonts.ready)
+        } catch (error) {
+            await page.close().catch(() => {})
+            throw error
+        }
 
         this.ctx.logger.info('字体加载完成。')
 
@@ -268,7 +322,83 @@ export class RendererService extends Service {
         return page
     }
 
+    public async renderGroupAnalysisHtml(
+        data: GroupAnalysisResult,
+        config: Config = this.config
+    ): Promise<string> {
+        let theme = config.theme
+        if (theme === 'auto') {
+            const hour = new Date().getHours()
+            theme = hour >= 19 || hour < 6 ? 'dark' : 'light'
+        }
+        const skin = config.skin || 'md3'
+        const templatePath = this.getSkinPath('template_group.html')
+        let templateHtml = await fs.readFile(templatePath, 'utf-8')
+        // Exported HTML lives outside the template directory. Embed local CSS
+        // so a static server does not need the plugin's private directory tree.
+        for (const match of templateHtml.matchAll(/<link\b[^>]*>/gi)) {
+            if (!/rel=["']stylesheet["']/i.test(match[0])) continue
+            const href = match[0].match(/href=["']([^"']+)["']/i)?.[1]
+            if (!href || /^(?:[a-z]+:|\/\/)/i.test(href)) continue
+            const css = await fs.readFile(
+                path.resolve(path.dirname(templatePath), href),
+                'utf-8'
+            )
+            templateHtml = templateHtml.replace(
+                match[0],
+                () => `<style>${css}</style>`
+            )
+        }
+        templateHtml = applySkinAliasStyles(templateHtml, skin)
+        const dynamicAvatarUrl =
+            data.userStats?.[0]?.avatar ||
+            'https://cravatar.cn/avatar/00000000000000000000000000000000?d=mp'
+        const filledHtml = renderTemplate(templateHtml, {
+            groupName: data.groupName,
+            analysisDate: data.analysisDate,
+            totalMessages: String(data.totalMessages),
+            totalParticipants: String(data.totalParticipants),
+            totalChars: String(data.totalChars),
+            mostActivePeriod: data.mostActivePeriod,
+            emojiCount: String(data.emojiCount || 0),
+            userStats: formatUserStats(data.userStats, skin),
+            topics: formatTopics(data.topics || [], skin),
+            userTitles: formatUserTitles(data.userTitles || [], skin),
+            activeHoursChart: generateActiveHoursChart(
+                data.activeHoursData || {},
+                skin
+            ),
+            goldenQuotes: formatGoldenQuotes(data.goldenQuotes || [], skin),
+            chatQuality: formatChatQuality(data.chatQuality),
+            theme,
+            dynamicAvatarUrl
+        }).replace(
+            /<body([^>]*)>/,
+            (_match, attrs) => `<body${attrs} data-skin="${skin}">`
+        )
+        const outputDir = path.resolve(
+            this.ctx.baseDir,
+            config.htmlOutputDir || 'data/chatluna/group_analysis/reports'
+        )
+        await fs.mkdir(outputDir, { recursive: true })
+        const filename = `group-analysis-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`
+        const outputPath = path.join(outputDir, filename)
+        await fs.writeFile(outputPath, filledHtml, 'utf-8')
+        return outputPath
+    }
+
     public async renderUserPersona(
+        data: UserPersonaProfile,
+        username: string,
+        avatar: string,
+        config: Config
+    ): Promise<Buffer | string> {
+        return this.limiter.run(() =>
+            this.renderUserPersonaInternal(data, username, avatar, config)
+        )
+    }
+
+    private async renderUserPersonaInternal(
         data: UserPersonaProfile,
         username: string,
         avatar: string,
@@ -287,20 +417,23 @@ export class RendererService extends Service {
                 avatar,
                 theme
             )
+            try {
+                const renderer = skinRegistry.getSafe(config.skin || 'md3')
+                const selector = renderer.containerSelector
+                const element = await page.$(selector)
+                if (!element) {
+                    throw new Error(
+                        `无法在渲染的 HTML 中找到 ${selector} 元素。`
+                    )
+                }
 
-            const renderer = skinRegistry.getSafe(config.skin || 'md3')
-            const selector = renderer.containerSelector
-            const element = await page.$(selector)
-            if (!element) {
+                const imageBuffer = await element.screenshot()
+
+                this.ctx.logger.info('用户画像图片渲染成功！')
+                return imageBuffer
+            } finally {
                 await page.close()
-                throw new Error(`无法在渲染的 HTML 中找到 ${selector} 元素。`)
             }
-
-            const imageBuffer = await element.screenshot()
-            await page.close()
-
-            this.ctx.logger.info('用户画像图片渲染成功！')
-            return imageBuffer
         } catch (error) {
             this.ctx.logger.error('渲染用户画像图片时发生错误:', error)
             if (error instanceof Error) {
@@ -316,6 +449,15 @@ export class RendererService extends Service {
         avatar: string,
         theme: 'light' | 'dark'
     ): Promise<Awaited<ReturnType<Context['puppeteer']['page']>>> {
+        return this._renderUserPersonaUnsafe(data, username, avatar, theme)
+    }
+
+    private async _renderUserPersonaUnsafe(
+        data: UserPersonaProfile,
+        username: string,
+        avatar: string,
+        theme: 'light' | 'dark'
+    ): Promise<Awaited<ReturnType<Context['puppeteer']['page']>>> {
         if (!this.ctx.puppeteer) {
             throw new Error('Puppeteer service is not available.')
         }
@@ -325,7 +467,7 @@ export class RendererService extends Service {
         const skin = this.config.skin || 'md3'
         const outTemplateHtmlPath = path.resolve(
             this.templateDir,
-            skin,
+            skinSourceMap[skin] || skin,
             `${randomId}.html`
         )
 
@@ -401,14 +543,19 @@ export class RendererService extends Service {
         const page = await this.ctx.puppeteer.page()
 
         // 重新加载页面并使用 goto 访问本地文件
-        await page.goto('file://' + outTemplateHtmlPath, {
-            waitUntil: 'domcontentloaded'
-        })
+        try {
+            await page.goto('file://' + outTemplateHtmlPath, {
+                waitUntil: 'domcontentloaded'
+            })
 
-        this.ctx.logger.info('网页加载完成，开始等待字体加载。')
+            this.ctx.logger.info('网页加载完成，开始等待字体加载。')
 
-        // 等待字体加载完成
-        await page.evaluate(() => document.fonts.ready)
+            // 等待字体加载完成
+            await page.evaluate(() => document.fonts.ready)
+        } catch (error) {
+            await page.close().catch(() => {})
+            throw error
+        }
 
         this.ctx.logger.info('字体加载完成。')
 

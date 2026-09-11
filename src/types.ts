@@ -1,4 +1,4 @@
-import { h } from "koishi"
+import { h } from 'koishi'
 
 export interface OneBotMessage {
     message_id: number
@@ -73,8 +73,27 @@ export interface UserPersonaProfile {
     lastMergedFromHistory?: boolean
 }
 
+export interface ChatQualityDimension {
+    name: string
+    percentage: number
+    comment: string
+}
+
+export interface ChatQualityReview {
+    title: string
+    subtitle: string
+    dimensions: ChatQualityDimension[]
+    summary: string
+}
+
 // 最终的群聊分析报告数据结构
 export interface GroupAnalysisResult {
+    failedModules?: string[]
+    tokenUsage?: {
+        promptTokens: number
+        completionTokens: number
+        totalTokens: number
+    }
     totalMessages: number
     totalChars: number
     totalParticipants: number
@@ -85,10 +104,22 @@ export interface GroupAnalysisResult {
     topics: SummaryTopic[]
     userTitles: UserTitle[]
     goldenQuotes: GoldenQuote[]
+    chatQuality?: ChatQualityReview | null
     activeHoursChart: string
     activeHoursData: Record<number, number>
     analysisDate: string
     groupName: string
+}
+
+export interface ComicTrigger {
+    group: {
+        platform: string
+        selfId: string
+        guildId?: string
+        channelId?: string
+        enabled: boolean
+    }
+    topics?: SummaryTopic[]
 }
 
 export type QueryAction = '只分析' | '分析加对话' | '只对话'
@@ -139,6 +170,7 @@ export interface GroupMessageFetchFilter {
 }
 
 export interface MessageFilter {
+    platform?: string
     guildId?: string
     channelId?: string
     userId?: string[]

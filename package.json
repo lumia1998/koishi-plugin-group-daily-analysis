@@ -1,7 +1,7 @@
 {
     "name": "koishi-plugin-group-daily-analysis",
     "description": "一个分析QQ群聊历史并生成精美报告的Koishi插件",
-    "version": "0.0.1-alpha.3",
+    "version": "0.0.1-alpha.4",
     "type": "module",
     "main": "lib/index.cjs",
     "module": "lib/index.mjs",
@@ -46,9 +46,9 @@
     "dependencies": {
         "@langchain/core": "^0.3.80",
         "chrono-node": "^2.9.0",
+        "cron-parser": "^5.5.0",
         "js-yaml": "^4.1.0",
-        "zod": "3.25.76",
-        "cron-parser": "^5.5.0"
+        "zod": "3.25.76"
     },
     "resolutions": {
         "@langchain/core": "^0.3.80",
@@ -66,6 +66,7 @@
     },
     "devDependencies": {
         "@koishijs/client": "^5.30.11",
+        "@koishijs/plugin-console": "^5.30.11",
         "@typescript-eslint/eslint-plugin": "^7.18.1-alpha.3",
         "@typescript-eslint/parser": "^8.45.1-alpha.0",
         "atsc": "^1.2.2",
@@ -82,8 +83,10 @@
         "koishi-plugin-adapter-onebot": "^6.8.0",
         "koishi-plugin-chatluna": "^1.4.0-alpha.14",
         "koishi-plugin-puppeteer": "^3.9.0",
+        "prettier": "^3.6.2",
         "tsx": "^4.19.2",
         "typescript": "^5.9.3",
+        "vue": "^3.5.42",
         "yakumo": "^1.0.0",
         "yakumo-esbuild": "^1.0.0",
         "yakumo-mocha": "^1.0.0",
@@ -98,6 +101,7 @@
     },
     "scripts": {
         "test": "tsx --test tests/*.test.cts",
+        "test:ui": "tsx tests/ui/verify.cts",
         "build": "npx yakumo build",
         "bump": "npx yakumo version",
         "dep": "npx yakumo upgrade",

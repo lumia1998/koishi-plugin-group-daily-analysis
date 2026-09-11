@@ -90,7 +90,7 @@ export class MessageService extends Service {
 
     private async handleMessage(session: Session) {
         const uniqueId = session.messageId
-            ? `${session.platform}_${session.messageId}`
+            ? `${session.platform}_${session.selfId}_${session.channelId}_${session.messageId}`
             : `${session.platform}_${session.selfId}_${session.channelId}_${Date.now()}_${Math.random()
                   .toString(36)
                   .substring(2, 9)}`
@@ -102,7 +102,12 @@ export class MessageService extends Service {
             guildId: session.guildId || '0',
             userId: session.userId,
             avatarUrl: session.event.user?.avatar || '',
-            username: session.username,
+            username:
+                session.username ||
+                session.event.user?.nick ||
+                session.event.user?.name ||
+                session.userId ||
+                '未知用户',
             content: session.content,
             timestamp: new Date(session.timestamp),
             messageId: session.messageId
@@ -238,7 +243,10 @@ export class MessageService extends Service {
                     guildId: msg.guild?.id ?? filter.guildId,
                     userId: msg.user.id,
                     username:
-                        msg.member?.name ?? msg.user.name ?? msg.user.nick,
+                        msg.member?.name ??
+                        msg.user.name ??
+                        msg.user.nick ??
+                        msg.user.id,
                     content: msg.content,
                     timestamp: new Date(msg.createdAt ?? msg.timestamp),
                     messageId: msg.id,
@@ -332,11 +340,13 @@ export class MessageService extends Service {
             ? this.ctx.bots.find((b) => b.selfId === filter.selfId)
             : undefined
         const inferred = inferPlatformInfo(filter, this.config.listenerGroups)
-        const platform = inferred.platform || botFromSelfId?.platform
+        const platform =
+            filter.platform || inferred.platform || botFromSelfId?.platform
         const selfId = inferred.selfId || filter.selfId
         const bot = this.ctx.bots.find(
             (b) => b.platform === platform && b.selfId === selfId
         )
+        filter = { ...filter, platform, selfId }
 
         if (this.config.alwaysPersistMessages) {
             this.ctx.logger.info('使用数据库历史消息获取功能。')
@@ -510,7 +520,7 @@ export class MessageService extends Service {
                 channelId: targetId,
                 guildId: filter.guildId,
                 userId: String(msg.sender.user_id),
-                username: msg.sender.nickname,
+                username: msg.sender.nickname || String(msg.sender.user_id),
                 content: msg.raw_message || '',
                 avatarUrl: getAvatarUrl(msg.sender.user_id),
                 timestamp: new Date(msg.time * 1000),
@@ -534,8 +544,23 @@ export class MessageService extends Service {
         filter: MessageFilter
     ): Promise<StoredMessage[]> {
         try {
+            // Include buffered messages before advancing any analysis cursor.
+            for (const [key, buffer] of this.persistenceBuffers) {
+                const message = buffer.messages[0]
+                if (
+                    message &&
+                    (!filter.selfId || message.selfId === filter.selfId) &&
+                    (!filter.platform ||
+                        message.platform === filter.platform) &&
+                    (!filter.channelId ||
+                        message.channelId === filter.channelId) &&
+                    (!filter.guildId || message.guildId === filter.guildId)
+                )
+                    await this.flushPendingBuffer(key)
+            }
             const query: Query<StoredMessage> = {}
-
+            if (filter.selfId) query.selfId = filter.selfId
+            if (filter.platform) query.platform = filter.platform
             if (filter.guildId) query.guildId = filter.guildId
             if (filter.channelId) query.channelId = filter.channelId
             if (filter.userId && filter.userId.length > 0)
@@ -557,7 +582,7 @@ export class MessageService extends Service {
                 // Exclude users in userFilter for group analysis
                 query.userId = query.userId
                     ? {
-                          $in: filter.userId.filter(
+                          $in: (filter.userId || []).filter(
                               (userId) =>
                                   !this.config.userFilter.includes(userId)
                           )
@@ -570,9 +595,11 @@ export class MessageService extends Service {
                 // Exclude users in personaUserFilter for user persona
                 query.userId = query.userId
                     ? {
-                          $in: filter.userId.filter(
+                          $in: (filter.userId || []).filter(
                               (userId) =>
-                                  !this.config.userFilter.includes(userId)
+                                  !this.config.personaUserFilter.includes(
+                                      userId
+                                  )
                           )
                       }
                     : { $nin: this.config.personaUserFilter }

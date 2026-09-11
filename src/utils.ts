@@ -2,12 +2,13 @@ import { Context, h } from 'koishi'
 
 import {
     BasicStatsResult,
+    ChatQualityReview,
     GroupAnalysisResult,
     StoredMessage,
     UserPersonaProfile,
     UserStats
 } from './types'
-import { Config } from './config'
+import { Config, GroupListener, GroupListMode } from './config'
 import type { OneBotBot } from 'koishi-plugin-adapter-onebot'
 
 import { skinRegistry } from './skins'
@@ -85,12 +86,38 @@ export function calculateBasicStats(
         stat.replyRatio = stat.messageCount
             ? parseFloat((stat.replyCount / stat.messageCount).toFixed(2))
             : 0
+        const userEmojiCount = Object.values(stat.emojiStats).reduce(
+            (sum, count) => sum + count,
+            0
+        )
         stat.emojiRatio = stat.messageCount
-            ? parseFloat((totalEmojiCount / stat.messageCount).toFixed(2))
+            ? parseFloat((userEmojiCount / stat.messageCount).toFixed(2))
             : 0
     }
 
     return { userStats, totalChars, totalEmojiCount, allMessagesText }
+}
+
+export function matchesGroupList(
+    id: string | undefined,
+    mode: GroupListMode | undefined,
+    groups: string[] | undefined,
+    inherited: boolean
+): boolean {
+    if (inherited || !mode || mode === 'inherit') return true
+    const found = !!id && (groups || []).includes(id)
+    return mode === 'whitelist' ? found : !found
+}
+
+export function isAutoAnalysisGroup(
+    group: GroupListener,
+    config: Pick<Config, 'autoAnalysisGroupMode' | 'autoAnalysisGroups'>
+): boolean {
+    const id = group.guildId || group.channelId
+    if (!group.enabled) return false
+    const mode = config.autoAnalysisGroupMode || 'inherit'
+    if (mode === 'inherit') return true
+    return matchesGroupList(id, mode, config.autoAnalysisGroups, false)
 }
 
 export function buildPersonaRecordId(
@@ -126,6 +153,8 @@ function getInitialUserStats(msg: StoredMessage): UserStats {
 export function generateTextReport(result: GroupAnalysisResult): string {
     let report = `📊 群聊分析报告 (${result.analysisDate})\n`
     report += `群组: ${result.groupName}\n\n`
+    if (result.failedModules?.length)
+        report += `部分模块未完成：${result.failedModules.join('、')}。以下保留已成功的分析结果。\n\n`
     report += `总消息: ${result.totalMessages} | 参与人数: ${result.totalParticipants} | 总字数: ${result.totalChars} | 表情: ${result.emojiCount}\n`
     report += `最活跃时段: ${result.mostActivePeriod}\n\n`
 
@@ -156,7 +185,41 @@ export function generateTextReport(result: GroupAnalysisResult): string {
         report += '无金句记录\n'
     }
 
+    if (result.chatQuality) {
+        report += `\n🧪 聊天质量锐评: ${result.chatQuality.title}\n`
+        if (result.chatQuality.subtitle)
+            report += `${result.chatQuality.subtitle}\n`
+        for (const dimension of result.chatQuality.dimensions || []) {
+            report += `- ${dimension.name}: ${dimension.percentage}% ${dimension.comment}\n`
+        }
+        if (result.chatQuality.summary)
+            report += `总评: ${result.chatQuality.summary}\n`
+    }
+
     return report
+}
+
+export function formatChatQuality(review?: ChatQualityReview | null): string {
+    if (!review) return '<div class="empty-state">未生成聊天质量锐评</div>'
+    const esc = (value: unknown) =>
+        String(value ?? '').replace(
+            /[&<>"']/g,
+            (char) =>
+                ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                })[char] || char
+        )
+    const dimensions = (review.dimensions || [])
+        .map(
+            (item) =>
+                `<div class="quality-dimension"><strong>${esc(item.name)}</strong><span>${Math.round(item.percentage)}%</span><p>${esc(item.comment)}</p></div>`
+        )
+        .join('')
+    return `<div class="quality-review"><h3>${esc(review.title)}</h3><p>${esc(review.subtitle)}</p><div class="quality-dimensions">${dimensions}</div><p class="quality-summary">${esc(review.summary)}</p></div>`
 }
 
 export function getAvatarUrl(userId: number | string): string {
@@ -402,13 +465,16 @@ export function isCacheExpiredByMinutes(
 
 export function buildGroupAnalysisCacheKey(
     selfId: string,
-    target: { guildId?: string; channelId?: string },
+    target: { platform?: string; guildId?: string; channelId?: string },
     days: number
 ): string {
-    const targetId = target.guildId
-        ? `guild:${target.guildId}`
-        : `channel:${target.channelId}`
-    return `${selfId}:${targetId}:${days}`
+    return JSON.stringify([
+        target.platform || '',
+        selfId,
+        target.guildId || '',
+        target.channelId || '',
+        days
+    ])
 }
 
 export function buildMessagePersistenceKey(message: StoredMessage): string {

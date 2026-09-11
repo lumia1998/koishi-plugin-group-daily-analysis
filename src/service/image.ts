@@ -6,7 +6,7 @@ import { isIP } from 'node:net'
 import { get } from 'node:https'
 import { Config } from '../config'
 import { endpoint, readJson, requestJson } from './api'
-import { Trace, errorKind } from '../diagnostics'
+import { errorKind, Trace } from '../diagnostics'
 
 const MAX_IMAGE = 20 * 1024 * 1024
 
@@ -60,6 +60,18 @@ export async function loadReference(
     const data = await readFile(absolute)
     imageMime(data)
     return data
+}
+
+export async function loadReferences(
+    paths: string[] | undefined,
+    baseDir: string
+): Promise<Buffer[]> {
+    const loaded: Buffer[] = []
+    for (const file of paths || []) {
+        const data = await loadReference(file, baseDir)
+        if (data) loaded.push(data)
+    }
+    return loaded
 }
 
 async function decodeImage(item: any, signal: AbortSignal): Promise<Buffer> {
@@ -125,7 +137,7 @@ async function decodeImage(item: any, signal: AbortSignal): Promise<Buffer> {
 export async function generateImage(
     config: Config['comic'],
     prompt: string,
-    reference?: Buffer,
+    reference?: Buffer | Buffer[],
     parentSignal?: AbortSignal,
     trace?: Trace
 ): Promise<Buffer> {
@@ -138,19 +150,26 @@ export async function generateImage(
     trace?.('生图请求开始', {
         protocol: config.protocol,
         model: config.model,
-        referenceBytes: reference?.length ?? 0,
+        referenceBytes: Array.isArray(reference)
+            ? reference.reduce((sum, item) => sum + item.length, 0)
+            : (reference?.length ?? 0),
         promptChars: prompt.length,
         timeoutSeconds: config.timeout
     })
     try {
         let item: any
+        const references = reference
+            ? Array.isArray(reference)
+                ? reference
+                : [reference]
+            : []
         if (config.protocol === 'google-v1beta') {
             const parts: any[] = [{ text: prompt }]
-            if (reference)
+            for (const item of references)
                 parts.push({
                     inlineData: {
-                        mimeType: imageMime(reference),
-                        data: reference.toString('base64')
+                        mimeType: imageMime(item),
+                        data: item.toString('base64')
                     }
                 })
             const data = await requestJson(
@@ -178,7 +197,7 @@ export async function generateImage(
                 b64_json: image?.inlineData?.data ?? image?.inline_data?.data
             }
         } else if (config.protocol === 'openai-images') {
-            if (reference) {
+            if (references.length) {
                 const url = endpoint(
                     config.baseUrl.replace(
                         /\/images\/generations\/?$/,
@@ -190,12 +209,14 @@ export async function generateImage(
                 body.append('model', config.model)
                 body.append('prompt', prompt)
                 body.append('size', config.size)
-                body.append(
-                    'image',
-                    new Blob([new Uint8Array(reference)], {
-                        type: imageMime(reference)
-                    }),
-                    'reference.' + imageMime(reference).split('/')[1]
+                references.forEach((item, index) =>
+                    body.append(
+                        'image',
+                        new Blob([new Uint8Array(item)], {
+                            type: imageMime(item)
+                        }),
+                        `reference-${index}.${imageMime(item).split('/')[1]}`
+                    )
                 )
                 const response = await fetch(url, {
                     method: 'POST',

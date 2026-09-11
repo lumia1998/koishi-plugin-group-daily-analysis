@@ -878,3 +878,11 @@ footer {
  *    - 颜色: on-surface
  *    - 用途: 保持简洁，不过度强调
  */
+body[data-skin="simple"] .container { border-radius: 8px; box-shadow: none; }
+body[data-skin="retro_futurism"] { background: #07111d; color: #9fffe0; }
+body[data-skin="retro_futurism"] .container { border: 1px solid #3fffc1; background: #081c2a; }
+body[data-skin="hack"] { background: #050505; color: #50ff50; font-family: monospace; }
+body[data-skin="hack"] .container { border: 1px solid #50ff50; background: #000; }
+body[data-skin="ATRI"], body[data-skin="BlueArchive"], body[data-skin="HatsuneMiku"] { background: linear-gradient(135deg, #fff0fa, #e8f4ff); }
+body[data-skin="art_nouveau"] { background: #f4ead8; color: #46321f; }
+body[data-skin="spring_festival"] { background: #fff4e8; color: #8f1d1d; }

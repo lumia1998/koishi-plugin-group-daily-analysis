@@ -69,8 +69,7 @@ export namespace CQCode {
                     return h('img', data)
                 } else if (type === 'replay') {
                     return h('quote', { id: data.qq })
-                }
-                else {
+                } else {
                     return h(type, data)
                 }
             })

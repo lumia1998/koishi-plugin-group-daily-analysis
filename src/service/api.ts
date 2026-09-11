@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Trace, errorKind } from '../diagnostics'
+import { errorKind, Trace } from '../diagnostics'
 export type TextProtocol =
-    'openai-responses' | 'anthropic-messages' | 'google-v1beta' | 'openai-chat'
+    | 'openai-responses'
+    | 'anthropic-messages'
+    | 'google-v1beta'
+    | 'openai-chat'
 
 export interface ApiConfig {
     protocol: TextProtocol
@@ -10,6 +13,21 @@ export interface ApiConfig {
     model: string
     timeout: number
     maxOutputTokens: number
+    retryCount?: number
+    retryBackoffSeconds?: number
+    topicModel?: string
+    titleModel?: string
+    goldenQuoteModel?: string
+    qualityModel?: string
+    personaModel?: string
+    queryModel?: string
+    chatModel?: string
+    comicModel?: string
+}
+
+export interface TextMessage {
+    role: 'system' | 'user' | 'assistant'
+    content: string
 }
 
 // Accept either a versioned API base or a full endpoint; never append /v1 twice.
@@ -117,9 +135,18 @@ export function textRequest(
     config: ApiConfig,
     model: string,
     prompt: string,
-    temperature: number
+    temperature: number,
+    messages?: TextMessage[]
 ) {
     const common = { model }
+    const conversation = messages || [
+        { role: 'user' as const, content: prompt }
+    ]
+    const system = conversation
+        .filter((m) => m.role === 'system')
+        .map((m) => m.content)
+        .join('\n\n')
+    const turns = conversation.filter((m) => m.role !== 'system')
     switch (config.protocol) {
         case 'openai-responses':
             return {
@@ -127,7 +154,7 @@ export function textRequest(
                 headers: {},
                 body: {
                     ...common,
-                    input: prompt,
+                    input: messages ? conversation : prompt,
                     max_output_tokens: config.maxOutputTokens,
                     store: false
                 }
@@ -142,7 +169,8 @@ export function textRequest(
                 body: {
                     ...common,
                     max_tokens: config.maxOutputTokens,
-                    messages: [{ role: 'user', content: prompt }]
+                    ...(system ? { system } : {}),
+                    messages: turns
                 }
             }
         case 'google-v1beta':
@@ -153,7 +181,13 @@ export function textRequest(
                 ),
                 headers: { 'x-goog-api-key': config.apiKey },
                 body: {
-                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    ...(system
+                        ? { systemInstruction: { parts: [{ text: system }] } }
+                        : {}),
+                    contents: turns.map((m) => ({
+                        role: m.role === 'assistant' ? 'model' : 'user',
+                        parts: [{ text: m.content }]
+                    })),
                     generationConfig: {
                         maxOutputTokens: config.maxOutputTokens,
                         temperature
@@ -166,7 +200,7 @@ export function textRequest(
                 headers: {},
                 body: {
                     ...common,
-                    messages: [{ role: 'user', content: prompt }],
+                    messages: conversation,
                     max_tokens: config.maxOutputTokens,
                     temperature
                 }

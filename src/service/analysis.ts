@@ -1,17 +1,15 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Context, h, Service, Session } from 'koishi'
 import { dump as yamlDump, load as yamlLoad } from 'js-yaml'
 import {
     AnalysisPromptContext,
-    GoldenQuote,
     GroupAnalysisResult,
     PersonaCache,
     PersonaRecord,
     QueryAction,
     QueryIntent,
     StoredMessage,
-    SummaryTopic,
-    UserPersonaProfile,
-    UserTitle
+    UserPersonaProfile
 } from '../types'
 import { Config } from '..'
 import {
@@ -24,6 +22,7 @@ import {
     generateTextReport,
     getAvatarUrl,
     getStartTimeByDays,
+    isAutoAnalysisGroup,
     isCacheExpiredByDays,
     isCacheExpiredByMinutes,
     mergePersona,
@@ -31,8 +30,23 @@ import {
 } from '../utils'
 import type { GuildMember } from '@satorijs/protocol'
 import type { OneBotBot } from 'koishi-plugin-adapter-onebot'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import { ConcurrencyLimiter } from './limiter'
+import { createHash, randomUUID } from 'node:crypto'
+import {
+    advanceSnapshot,
+    IncrementalSnapshot,
+    mergeIncrementalResults,
+    pendingMessages
+} from './incremental'
+import {
+    generateQQOfficialMarkdown,
+    isQQOfficialPlatform
+} from './platform-report'
 
 type AnalysisTarget = {
+    platform?: string
     guildId?: string
     channelId?: string
 }
@@ -40,6 +54,29 @@ type AnalysisTarget = {
 type GroupAnalysisCacheEntry = {
     result: GroupAnalysisResult
     analyzedAt: Date
+}
+
+type AnalysisCheckpoint = {
+    selfId: string
+    target: AnalysisTarget
+    days: number
+    format: 'image' | 'pdf' | 'text' | 'html'
+    startTime: string
+    endTime: string
+    result?: GroupAnalysisResult
+    moduleResults?: Partial<
+        Pick<
+            GroupAnalysisResult,
+            'topics' | 'userTitles' | 'goldenQuotes' | 'chatQuality'
+        >
+    >
+    reportId?: string
+}
+
+type ModuleCheckpoint = {
+    id: string
+    payload: AnalysisCheckpoint
+    write?: Promise<void>
 }
 
 export class AnalysisService extends Service {
@@ -52,14 +89,25 @@ export class AnalysisService extends Service {
     private personaCache = new Map<string, PersonaCache>()
     private personaProcessing = new Set<string>()
     private groupAnalysisCache = new Map<string, GroupAnalysisCacheEntry>()
+    private incrementalCounts = new Map<string, number>()
+    private incrementalSnapshots = new Map<string, IncrementalSnapshot>()
+    private incrementalRunning = new Map<string, Promise<void>>()
+    private incrementalWrites = new Map<string, Promise<unknown>>()
+    private readonly taskLimiter: ConcurrencyLimiter
 
     constructor(
         ctx: Context,
         public config: Config
     ) {
         super(ctx, 'chatluna_group_analysis', true)
+        this.taskLimiter = new ConcurrencyLimiter(
+            config.maxConcurrentTasks || 3
+        )
         this.setupPersonaDatabase()
+        this.setupReportDatabase()
         this.setupPersonaMessageListener()
+        this.setupIncrementalDatabase()
+        this.setupIncrementalMessageListener()
     }
 
     private setupPersonaDatabase() {
@@ -85,6 +133,630 @@ export class AnalysisService extends Service {
                 primary: 'id'
             }
         )
+    }
+
+    private setupReportDatabase() {
+        this.ctx.database.extend(
+            'chatluna_analysis_reports',
+            {
+                id: { type: 'char', length: 180 },
+                platform: { type: 'char', length: 30 },
+                selfId: { type: 'char', length: 100 },
+                guildId: { type: 'char', length: 100, nullable: true },
+                channelId: { type: 'char', length: 100, nullable: true },
+                days: 'integer',
+                format: { type: 'char', length: 20 },
+                result: 'text',
+                promptTokens: 'integer',
+                completionTokens: 'integer',
+                totalTokens: 'integer',
+                createdAt: 'timestamp',
+                status: { type: 'char', length: 20 }
+            },
+            { primary: 'id' }
+        )
+        this.ctx.setInterval(
+            async () => {
+                const days = this.config.retentionDays
+                if (!days) return
+                const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+                await this.ctx.database
+                    .remove('chatluna_analysis_reports', {
+                        createdAt: { $lt: cutoff }
+                    })
+                    .catch((error) =>
+                        this.ctx.logger.warn('清理历史分析报告失败。', error)
+                    )
+                await this.ctx.database
+                    .remove('chatluna_analysis_checkpoints', {
+                        updatedAt: { $lt: cutoff }
+                    })
+                    .catch((error) =>
+                        this.ctx.logger.warn('清理分析检查点失败。', error)
+                    )
+            },
+            6 * 60 * 60 * 1000
+        )
+        this.ctx.database.extend(
+            'chatluna_analysis_checkpoints',
+            {
+                id: { type: 'char', length: 180 },
+                stage: { type: 'char', length: 40 },
+                payload: 'text',
+                updatedAt: 'timestamp',
+                status: { type: 'char', length: 20 }
+            },
+            { primary: 'id' }
+        )
+        this.ctx.on('ready', async () => {
+            if (this.config.checkpointEnabled === false) return
+            const pending = await this.ctx.database
+                .select('chatluna_analysis_checkpoints')
+                .where({ status: 'running' })
+                .execute()
+                .catch(() => [])
+            for (const row of pending as any[]) {
+                try {
+                    const payload = JSON.parse(row.payload || '{}')
+                    const target = payload.target
+                    const selfId = payload.selfId || row.id.split(':')[0]
+                    const bot = target && this._getBot(selfId, target.platform)
+                    if (
+                        target &&
+                        bot &&
+                        shouldListenToMessage(
+                            { ...target, selfId, platform: bot.platform },
+                            this.config.listenerGroups,
+                            this.config.enableAllGroupsByDefault
+                        )
+                    ) {
+                        const days = Number(
+                            payload.days || this.config.cronAnalysisDays || 1
+                        )
+                        this.ctx.logger.info(
+                            `恢复未完成的群分析任务：${row.id}`
+                        )
+                        this.executeGroupAnalysis(
+                            selfId,
+                            target,
+                            days,
+                            undefined,
+                            true,
+                            false,
+                            payload.result,
+                            { id: row.id, payload }
+                        ).catch((error) =>
+                            this.ctx.logger.warn(
+                                `恢复分析任务失败：${row.id}`,
+                                error
+                            )
+                        )
+                    } else {
+                        await this.ctx.database.upsert(
+                            'chatluna_analysis_checkpoints',
+                            [
+                                {
+                                    ...row,
+                                    status: 'failed',
+                                    updatedAt: new Date()
+                                }
+                            ]
+                        )
+                    }
+                } catch (error) {
+                    this.ctx.logger.warn(`恢复分析检查点失败：${row.id}`, error)
+                }
+            }
+        })
+    }
+
+    private setupIncrementalDatabase() {
+        this.ctx.database.extend(
+            'chatluna_incremental_states',
+            {
+                id: { type: 'char', length: 180 },
+                platform: { type: 'char', length: 30 },
+                selfId: { type: 'char', length: 100 },
+                guildId: { type: 'char', length: 100, nullable: true },
+                channelId: { type: 'char', length: 100, nullable: true },
+                count: 'integer',
+                cursor: { type: 'timestamp', nullable: true },
+                result: { type: 'text', nullable: true },
+                updatedAt: 'timestamp'
+            },
+            { primary: 'id' }
+        )
+        this.ctx.on('ready', async () => {
+            if (!this.config.incrementalEnabled) return
+            const rows = await this.ctx.database
+                .select('chatluna_incremental_states')
+                .execute()
+                .catch(() => [])
+            for (const row of rows as any[]) {
+                this.incrementalCounts.set(row.id, Number(row.count || 0))
+                if (row.result) {
+                    try {
+                        const snapshot = JSON.parse(row.result)
+                        if (
+                            snapshot.version === 1 &&
+                            Array.isArray(snapshot.batches)
+                        )
+                            this.incrementalSnapshots.set(row.id, snapshot)
+                    } catch {
+                        /* ignore corrupt state */
+                    }
+                }
+                const bot = this._getBot(row.selfId, row.platform)
+                if (bot && row.count >= this.config.incrementalBatchSize) {
+                    const target = {
+                        guildId: row.guildId,
+                        channelId: row.channelId
+                    }
+                    const session = {
+                        platform: row.platform,
+                        selfId: row.selfId,
+                        ...target
+                    } as Session
+                    if (
+                        shouldListenToMessage(
+                            session,
+                            this.config.listenerGroups,
+                            this.config.enableAllGroupsByDefault
+                        )
+                    )
+                        this.runIncrementalBatch(
+                            row.selfId,
+                            session,
+                            target,
+                            row.id
+                        ).catch((error) =>
+                            this.ctx.logger.warn('恢复增量批次失败。', error)
+                        )
+                }
+            }
+        })
+    }
+
+    private setupIncrementalMessageListener() {
+        this.ctx.chatluna_group_analysis_message.onUserMessage(
+            async (session) => {
+                if (!this.config.incrementalEnabled) return
+                if (
+                    !shouldListenToMessage(
+                        session,
+                        this.config.listenerGroups,
+                        this.config.enableAllGroupsByDefault
+                    )
+                )
+                    return
+                const target = {
+                    platform: session.platform,
+                    guildId: session.guildId || undefined,
+                    channelId: session.channelId || undefined
+                }
+                if (session.isDirect) return
+                const id = `${session.platform}:${session.selfId}:${target.guildId || ''}:${target.channelId || ''}`
+                await this.writeIncremental(id, async () => {
+                    const count = (this.incrementalCounts.get(id) || 0) + 1
+                    this.incrementalCounts.set(id, count)
+                    await this.ctx.database.upsert(
+                        'chatluna_incremental_states',
+                        [
+                            {
+                                id,
+                                platform: session.platform,
+                                selfId: session.selfId,
+                                ...target,
+                                count,
+                                updatedAt: new Date()
+                            }
+                        ]
+                    )
+                })
+                const count = this.incrementalCounts.get(id) || 0
+                if (
+                    count < Math.max(1, this.config.incrementalBatchSize || 100)
+                )
+                    return
+                this.runIncrementalBatch(
+                    session.selfId,
+                    session,
+                    target,
+                    id
+                ).catch((error) =>
+                    this.ctx.logger.warn(`增量任务失败 (${id})。`, error)
+                )
+            }
+        )
+    }
+
+    private async writeIncremental<T>(
+        id: string,
+        task: () => Promise<T>
+    ): Promise<T> {
+        const previous = this.incrementalWrites.get(id) || Promise.resolve()
+        const next = previous.catch(() => {}).then(task)
+        this.incrementalWrites.set(id, next)
+        try {
+            return await next
+        } finally {
+            if (this.incrementalWrites.get(id) === next)
+                this.incrementalWrites.delete(id)
+        }
+    }
+
+    private async runIncrementalBatch(
+        selfId: string,
+        session: Session,
+        target: AnalysisTarget,
+        id: string
+    ) {
+        const running = this.incrementalRunning.get(id)
+        if (running) return running
+        const task = this.taskLimiter.run(async () => {
+            let previousCount: number
+            do {
+                previousCount = this.incrementalCounts.get(id) || 0
+                await this.consumeIncrementalBatch(selfId, session, target, id)
+            } while (
+                (this.incrementalCounts.get(id) || 0) >=
+                    this.config.incrementalBatchSize &&
+                (this.incrementalCounts.get(id) || 0) !== previousCount
+            )
+        })
+        this.incrementalRunning.set(id, task)
+        try {
+            await task
+        } finally {
+            this.incrementalRunning.delete(id)
+        }
+    }
+
+    private async consumeIncrementalBatch(
+        selfId: string,
+        session: Session,
+        target: AnalysisTarget,
+        id: string
+    ) {
+        const consumedCount = this.incrementalCounts.get(id) || 0
+        const snapshot = this.incrementalSnapshots.get(id)
+        const endTime = new Date()
+        const start = new Date(
+            Date.now() -
+                Math.max(1, this.config.incrementalWindowHours || 24) *
+                    60 *
+                    60 *
+                    1000
+        )
+        const messages =
+            await this.ctx.chatluna_group_analysis_message.getHistoricalMessages(
+                {
+                    ...target,
+                    selfId,
+                    startTime: new Date(
+                        Math.max(start.getTime(), snapshot?.cursor || 0)
+                    ),
+                    endTime,
+                    limit: this.config.maxMessages + 1,
+                    purpose: 'group-analysis'
+                }
+            )
+        let delta = pendingMessages(messages, snapshot)
+        if (!delta.length) return
+        const overflow = messages.length > this.config.maxMessages
+        if (overflow && !this.config.incrementalFallbackFull)
+            throw new Error(
+                '增量消息超过 maxMessages，未推进游标；请提高上限或启用全量回退。'
+            )
+        const windowMessages =
+            await this.ctx.chatluna_group_analysis_message.getHistoricalMessages(
+                {
+                    ...target,
+                    selfId,
+                    startTime: start,
+                    endTime,
+                    limit: this.config.maxMessages,
+                    purpose: 'group-analysis'
+                }
+            )
+        if (windowMessages.length < this.config.minMessages) return
+        if (overflow) delta = windowMessages
+        try {
+            let previous = overflow ? undefined : snapshot
+            const analyze = async (input: StoredMessage[]) => {
+                const result = await this.analyzeGroupMessages(
+                    input,
+                    selfId,
+                    target
+                )
+                if (result.failedModules?.length)
+                    throw new Error(
+                        `增量模块失败：${result.failedModules.join('、')}；保留游标等待重试。`
+                    )
+                return result
+            }
+            let result: GroupAnalysisResult
+            try {
+                result = await analyze(delta)
+            } catch (error) {
+                if (!this.config.incrementalFallbackFull || overflow)
+                    throw error
+                this.ctx.logger.warn(
+                    '增量分析失败，尝试当前窗口全量回退。',
+                    error
+                )
+                delta = windowMessages
+                previous = undefined
+                result = await analyze(delta)
+            }
+            const next = advanceSnapshot(
+                previous,
+                delta,
+                result,
+                start.getTime()
+            )
+            const stats = await this.analyzeGroupMessagesInternal(
+                windowMessages,
+                selfId,
+                target,
+                undefined,
+                result
+            )
+            const merged = mergeIncrementalResults(
+                next,
+                { ...stats, tokenUsage: result.tokenUsage },
+                this.config.maxTopics,
+                this.config.maxGoldenQuotes,
+                this.config.maxUserTitles
+            )
+            const batchId = createHash('sha256')
+                .update(
+                    `${id}:${next.cursor}:${[...next.cursorIds].sort().join(',')}`
+                )
+                .digest('hex')
+            await this.persistReport(
+                selfId,
+                target,
+                Math.max(1, Math.ceil(this.config.incrementalWindowHours / 24)),
+                'incremental',
+                merged,
+                batchId
+            )
+            await this.ctx.database.set(
+                'chatluna_analysis_reports',
+                { id: batchId },
+                { status: 'analyzed' }
+            )
+            await this.writeIncremental(id, async () => {
+                const count = Math.max(
+                    0,
+                    (this.incrementalCounts.get(id) || 0) - consumedCount
+                )
+                await this.ctx.database.upsert('chatluna_incremental_states', [
+                    {
+                        id,
+                        platform: session.platform,
+                        selfId,
+                        guildId: target.guildId,
+                        channelId: target.channelId,
+                        count,
+                        cursor: new Date(next.cursor),
+                        result: JSON.stringify(next),
+                        updatedAt: new Date()
+                    }
+                ])
+                this.incrementalCounts.set(id, count)
+                this.incrementalSnapshots.set(id, next)
+            })
+            if (this.config.incrementalImmediateReport)
+                await this.executeGroupAnalysisInternal(
+                    selfId,
+                    target,
+                    1,
+                    undefined,
+                    true,
+                    true,
+                    {
+                        ...merged,
+                        tokenUsage: {
+                            promptTokens: 0,
+                            completionTokens: 0,
+                            totalTokens: 0
+                        }
+                    }
+                )
+        } catch (error) {
+            this.ctx.logger.warn(`增量分析失败 (${id})。`, error)
+            throw error
+        }
+    }
+
+    private async prepareIncrementalReport(group: {
+        platform: string
+        selfId: string
+        guildId?: string
+        channelId?: string
+    }) {
+        const id = `${group.platform}:${group.selfId}:${group.guildId || ''}:${group.channelId || ''}`
+        await this.runIncrementalBatch(
+            group.selfId,
+            group as Session,
+            group,
+            id
+        )
+        const snapshot = this.incrementalSnapshots.get(id)
+        if (!snapshot) return undefined
+        const startTime = getStartTimeByDays(
+            this.config.cronAnalysisDays,
+            this.config.useCalendarDayWindow
+        )
+        const batches = snapshot.batches.filter(
+            (batch) => batch.start >= startTime.getTime()
+        )
+        if (!batches.length) return undefined
+        // Rebuild statistics for the scheduled report's own time range.
+        const messages =
+            await this.ctx.chatluna_group_analysis_message.getHistoricalMessages(
+                {
+                    ...group,
+                    startTime,
+                    endTime: new Date(),
+                    limit: this.config.maxMessages,
+                    purpose: 'group-analysis'
+                }
+            )
+        if (messages.length < this.config.minMessages) return undefined
+        if (
+            pendingMessages(messages, snapshot).length ||
+            messages.some((message) => {
+                const time = new Date(message.timestamp).getTime()
+                return !batches.some(
+                    (batch) => time >= batch.start && time <= batch.end
+                )
+            })
+        )
+            return undefined
+        const latest = batches[batches.length - 1].result
+        const stats = await this.analyzeGroupMessagesInternal(
+            messages,
+            group.selfId,
+            group,
+            undefined,
+            latest
+        )
+        return mergeIncrementalResults(
+            { ...snapshot, batches },
+            stats,
+            this.config.maxTopics,
+            this.config.maxGoldenQuotes,
+            this.config.maxUserTitles
+        )
+    }
+
+    private async saveCheckpoint(
+        id: string,
+        stage: string,
+        payload: unknown,
+        status = 'running'
+    ) {
+        if (this.config.checkpointEnabled === false) return
+        await this.ctx.database
+            .upsert('chatluna_analysis_checkpoints', [
+                {
+                    id,
+                    stage,
+                    payload: JSON.stringify(payload),
+                    updatedAt: new Date(),
+                    status
+                }
+            ])
+            .catch((error) =>
+                this.ctx.logger.warn('保存分析检查点失败。', error)
+            )
+    }
+
+    private async persistReport(
+        selfId: string,
+        target: AnalysisTarget,
+        days: number,
+        format: string,
+        result: GroupAnalysisResult,
+        taskId?: string
+    ) {
+        const id = taskId || randomUUID()
+        await this.ctx.database.upsert('chatluna_analysis_reports', [
+            {
+                id,
+                platform:
+                    this._getBot(selfId, target.platform)?.platform ||
+                    'unknown',
+                selfId,
+                guildId: target.guildId,
+                channelId: target.channelId,
+                days,
+                format,
+                result: JSON.stringify(result),
+                promptTokens: result.tokenUsage?.promptTokens || 0,
+                completionTokens: result.tokenUsage?.completionTokens || 0,
+                totalTokens: result.tokenUsage?.totalTokens || 0,
+                createdAt: new Date(),
+                status: 'ready'
+            }
+        ])
+        return id
+    }
+
+    private startComic(
+        selfId: string,
+        target: AnalysisTarget,
+        result: GroupAnalysisResult
+    ) {
+        if (
+            !this.config.comic?.enabled ||
+            !this.config.comic.autoSend ||
+            !result.topics?.length
+        )
+            return
+        this.ctx
+            .parallel('group-daily-analysis/auto-comic', {
+                group: {
+                    ...target,
+                    platform:
+                        this._getBot(selfId, target.platform)?.platform ||
+                        'unknown',
+                    selfId,
+                    channelId: target.channelId || target.guildId || '',
+                    enabled: true
+                },
+                topics: result.topics
+            })
+            .catch((error) => this.ctx.logger.warn('自动漫画任务失败。', error))
+    }
+
+    private async archiveOneBotReport(
+        bot: any,
+        groupId: string,
+        payload: Buffer,
+        format: string
+    ) {
+        if (
+            bot?.platform !== 'onebot' ||
+            (!this.config.uploadGroupFile && !this.config.uploadGroupAlbum)
+        )
+            return
+        const request = bot.internal?._request
+        const albumOwner =
+            typeof bot.uploadGroupAlbum === 'function' ? bot : bot.internal
+        const album = albumOwner?.uploadGroupAlbum
+        const canUploadFile =
+            this.config.uploadGroupFile && typeof request === 'function'
+        const canUploadAlbum =
+            this.config.uploadGroupAlbum &&
+            format !== 'pdf' &&
+            typeof album === 'function'
+        if (!canUploadFile && !canUploadAlbum) return
+        const dir = path.resolve(
+            this.ctx.baseDir,
+            'data/chatluna/group_analysis/archive'
+        )
+        await fs.mkdir(dir, { recursive: true })
+        const extension = format === 'pdf' ? 'pdf' : 'png'
+        const file = path.join(dir, `report-${Date.now()}.${extension}`)
+        await fs.writeFile(file, payload)
+        try {
+            if (canUploadFile) {
+                await request.call(bot.internal, 'upload_group_file', {
+                    group_id: groupId,
+                    file,
+                    name: path.basename(file)
+                })
+            }
+            if (canUploadAlbum) {
+                await album.call(albumOwner, groupId, file)
+            }
+        } catch (error) {
+            this.ctx.logger.warn('OneBot 报告归档接口不可用，已跳过。', error)
+        }
     }
 
     private setupPersonaMessageListener() {
@@ -329,7 +1001,7 @@ export class AnalysisService extends Service {
         const totalLimit = this.config.personaMaxMessages
 
         for (const group of relevantGroups) {
-            const bot = this._getBot(group.selfId)
+            const bot = this._getBot(group.selfId, group.platform)
 
             let userGroupInfo: GuildMember | null = null
 
@@ -443,6 +1115,7 @@ export class AnalysisService extends Service {
                 {
                     guildId: target.guildId,
                     channelId: target.channelId,
+                    platform: target.platform,
                     startTime,
                     selfId,
                     endTime,
@@ -476,6 +1149,7 @@ export class AnalysisService extends Service {
                 {
                     guildId: target.guildId,
                     channelId: target.channelId,
+                    platform: target.platform,
                     startTime,
                     selfId,
                     endTime,
@@ -492,7 +1166,7 @@ export class AnalysisService extends Service {
         selfId: string,
         target: AnalysisTarget
     ): Promise<string> {
-        const bot = this._getBot(selfId)
+        const bot = this._getBot(selfId, target.platform)
         const fallbackName = target.guildId || target.channelId || 'unknown'
         let groupName = fallbackName
         if (bot) {
@@ -566,13 +1240,64 @@ export class AnalysisService extends Service {
         selfId: string,
         target: AnalysisTarget,
         days: number,
-        outputFormat?: 'image' | 'pdf' | 'text',
-        force?: boolean
+        outputFormat?: 'image' | 'pdf' | 'text' | 'html',
+        force?: boolean,
+        triggerComic = true,
+        suppliedResult?: GroupAnalysisResult,
+        recovery?: { id: string; payload: AnalysisCheckpoint }
     ) {
-        const bot = this._getBot(selfId)
+        const limiter =
+            this.taskLimiter ||
+            new ConcurrencyLimiter(this.config.maxConcurrentTasks || 3)
+        return limiter.run(() =>
+            this.executeGroupAnalysisInternal(
+                selfId,
+                target,
+                days,
+                outputFormat,
+                force,
+                triggerComic,
+                suppliedResult,
+                recovery
+            )
+        )
+    }
+
+    private async executeGroupAnalysisInternal(
+        selfId: string,
+        target: AnalysisTarget,
+        days: number,
+        outputFormat?: 'image' | 'pdf' | 'text' | 'html',
+        force?: boolean,
+        triggerComic = true,
+        suppliedResult?: GroupAnalysisResult,
+        recovery?: { id: string; payload: AnalysisCheckpoint }
+    ) {
+        const bot = this._getBot(selfId, target.platform)
         const targetChannel = target.channelId ?? target.guildId
+        target = { ...target, platform: bot?.platform || target.platform }
         const targetGuildContext =
             target.channelId && target.guildId ? target.guildId : undefined
+        const checkpointId = recovery?.id || randomUUID()
+        const format =
+            outputFormat ||
+            recovery?.payload.format ||
+            this.config.outputFormat ||
+            'image'
+        const checkpoint: AnalysisCheckpoint = {
+            ...recovery?.payload,
+            selfId,
+            target,
+            days,
+            format,
+            startTime:
+                recovery?.payload.startTime ||
+                getStartTimeByDays(
+                    days,
+                    this.config.useCalendarDayWindow
+                ).toISOString(),
+            endTime: recovery?.payload.endTime || new Date().toISOString()
+        }
 
         if (!targetChannel) {
             this.ctx.logger.warn('执行群分析需要提供 channelId 或 guildId。')
@@ -583,6 +1308,8 @@ export class AnalysisService extends Service {
             bot?.sendMessage(targetChannel, content, targetGuildContext)
 
         let message: h
+        let completedResult: GroupAnalysisResult | undefined
+        let archivePayload: Buffer | undefined
 
         try {
             const cacheKey = buildGroupAnalysisCacheKey(selfId, target, days)
@@ -595,20 +1322,41 @@ export class AnalysisService extends Service {
 
             let analysisResult: GroupAnalysisResult
 
-            if (!shouldRefresh && cached) {
-                analysisResult = cached.result
+            if (suppliedResult || checkpoint.result) {
+                analysisResult = suppliedResult || checkpoint.result
+            } else if (!shouldRefresh && cached) {
+                analysisResult = {
+                    ...cached.result,
+                    tokenUsage: {
+                        promptTokens: 0,
+                        completionTokens: 0,
+                        totalTokens: 0
+                    }
+                }
             } else {
-                await sendStatus(`开始分析群聊近 ${days} 天的活动，请稍候...`)
+                await this.saveCheckpoint(checkpointId, 'fetching', checkpoint)
+                await sendStatus(
+                    `开始分析群聊近 ${days} 天的活动，请稍候...`
+                ).catch(() => {})
 
-                const messages = await this._getGroupHistoryFromMessageService(
-                    selfId,
-                    target,
-                    days
-                )
+                const messages =
+                    await this._getGroupHistoryFromMessageServiceByTimeRange(
+                        selfId,
+                        target,
+                        new Date(checkpoint.startTime),
+                        new Date(checkpoint.endTime)
+                    )
+                await this.saveCheckpoint(checkpointId, 'analyzing', checkpoint)
 
                 if (messages.length < this.config.minMessages) {
+                    await this.saveCheckpoint(
+                        checkpointId,
+                        'skipped',
+                        checkpoint,
+                        'skipped'
+                    )
                     await sendStatus(
-                        `消息数量（${messages.length}/${this.config.minMessages}）不足于进行进行有效分析。`
+                        `消息数量（${messages.length}/${this.config.minMessages}）不足于进行有效分析。`
                     )
                     return
                 }
@@ -620,7 +1368,10 @@ export class AnalysisService extends Service {
                 analysisResult = await this.analyzeGroupMessages(
                     messages,
                     selfId,
-                    target
+                    target,
+                    undefined,
+                    recovery?.payload.moduleResults,
+                    { id: checkpointId, payload: checkpoint }
                 )
 
                 this.groupAnalysisCache.set(cacheKey, {
@@ -629,7 +1380,20 @@ export class AnalysisService extends Service {
                 })
             }
 
-            const format = outputFormat || this.config.outputFormat || 'image'
+            completedResult = analysisResult
+            checkpoint.result = analysisResult
+            await this.saveCheckpoint(checkpointId, 'rendering', checkpoint)
+            checkpoint.reportId = await this.persistReport(
+                selfId,
+                target,
+                days,
+                format,
+                analysisResult,
+                checkpointId
+            )
+            // Launch before rendering or sending. Recovery never repeats paid drawing.
+            if (triggerComic && !recovery)
+                this.startComic(selfId, target, analysisResult)
 
             switch (format) {
                 case 'image':
@@ -639,10 +1403,9 @@ export class AnalysisService extends Service {
                                 analysisResult,
                                 this.config
                             )
-                        message =
-                            typeof image === 'string'
-                                ? h.text(image)
-                                : h.image(image, 'image/png')
+                        if (typeof image === 'string') throw new Error(image)
+                        message = h.image(image, 'image/png')
+                        if (Buffer.isBuffer(image)) archivePayload = image
                     }
                     break
                 case 'pdf': {
@@ -650,16 +1413,73 @@ export class AnalysisService extends Service {
                         await this.ctx.chatluna_group_analysis_renderer.renderGroupAnalysisToPdf(
                             analysisResult
                         )
-                    message = pdfBuffer
-                        ? h.file(pdfBuffer, 'application/pdf')
-                        : h.text('PDF 渲染失败，请检查日志。')
+                    if (!pdfBuffer) throw new Error('PDF 渲染失败。')
+                    message = h.file(pdfBuffer, 'application/pdf')
+                    archivePayload = pdfBuffer
+                    break
+                }
+                case 'html': {
+                    const reportPath =
+                        await this.ctx.chatluna_group_analysis_renderer.renderGroupAnalysisHtml(
+                            analysisResult,
+                            this.config
+                        )
+                    message = h.text(
+                        this.config.htmlBaseUrl
+                            ? `${this.config.htmlBaseUrl.replace(/\/$/, '')}/${reportPath.split(/[\\/]/).pop()}`
+                            : `HTML 报告已保存：${reportPath}`
+                    )
                     break
                 }
                 default: {
-                    message = h.text(generateTextReport(analysisResult))
+                    message = isQQOfficialPlatform(bot?.platform)
+                        ? h('markdown', {
+                              content:
+                                  generateQQOfficialMarkdown(analysisResult)
+                          })
+                        : h.text(generateTextReport(analysisResult))
                 }
             }
+            await this.saveCheckpoint(checkpointId, 'sending', checkpoint)
+            if (!bot) throw new Error('机器人不可用。')
+            await bot.sendMessage(targetChannel, message, targetGuildContext)
+            await this.ctx.database.set(
+                'chatluna_analysis_reports',
+                { id: checkpointId },
+                {
+                    status: analysisResult.failedModules?.length
+                        ? 'partial'
+                        : 'completed'
+                }
+            )
+            await this.saveCheckpoint(
+                checkpointId,
+                'completed',
+                checkpoint,
+                'completed'
+            )
+            if (archivePayload)
+                await this.archiveOneBotReport(
+                    bot,
+                    targetChannel,
+                    archivePayload,
+                    format
+                ).catch(() => {})
         } catch (error) {
+            await this.saveCheckpoint(
+                checkpointId,
+                'failed',
+                checkpoint,
+                'failed'
+            )
+            if (checkpoint.reportId)
+                await this.ctx.database
+                    .set(
+                        'chatluna_analysis_reports',
+                        { id: checkpoint.reportId },
+                        { status: 'failed' }
+                    )
+                    .catch(() => {})
             this.ctx.logger.error(
                 `为群组 ${target.guildId || target.channelId} 执行分析任务时发生错误:`,
                 error
@@ -670,18 +1490,33 @@ export class AnalysisService extends Service {
             message = h.text(
                 `分析失败: ${errorMessage}。请检查网络连接和 LLM 配置，或联系管理员。`
             )
+            await sendStatus(message).catch(() => {})
         }
-
-        await bot?.sendMessage(targetChannel, message)
+        return completedResult
     }
 
     public async executeGroupQuery(
         session: Session,
         target: AnalysisTarget,
         query: string,
-        outputFormat?: 'image' | 'pdf' | 'text'
+        outputFormat?: 'image' | 'pdf' | 'text' | 'html'
     ) {
-        const bot = this._getBot(session.selfId)
+        const limiter =
+            this.taskLimiter ||
+            new ConcurrencyLimiter(this.config.maxConcurrentTasks || 3)
+        return limiter.run(() =>
+            this.executeGroupQueryInternal(session, target, query, outputFormat)
+        )
+    }
+
+    private async executeGroupQueryInternal(
+        session: Session,
+        target: AnalysisTarget,
+        query: string,
+        outputFormat?: 'image' | 'pdf' | 'text' | 'html'
+    ) {
+        const bot = this._getBot(session.selfId, session.platform)
+        target = { ...target, platform: session.platform }
         const targetChannel = target.channelId ?? target.guildId
         const targetGuildContext =
             target.channelId && target.guildId ? target.guildId : undefined
@@ -781,41 +1616,26 @@ export class AnalysisService extends Service {
             analysisContext
         )
 
+        const queryDays = Math.max(
+            1,
+            Math.ceil(
+                (timeRange.end.getTime() - timeRange.start.getTime()) /
+                    (24 * 60 * 60 * 1000)
+            )
+        )
         const textReport = generateTextReport(analysisResult)
         const format = outputFormat || this.config.outputFormat || 'image'
 
         if (action !== '只对话') {
-            let reportMessage: h
-            switch (format) {
-                case 'image':
-                    {
-                        const image =
-                            await this.ctx.chatluna_group_analysis_renderer.renderGroupAnalysis(
-                                analysisResult,
-                                this.config
-                            )
-                        reportMessage =
-                            typeof image === 'string'
-                                ? h.text(image)
-                                : h.image(image, 'image/png')
-                    }
-                    break
-                case 'pdf': {
-                    const pdfBuffer =
-                        await this.ctx.chatluna_group_analysis_renderer.renderGroupAnalysisToPdf(
-                            analysisResult
-                        )
-                    reportMessage = pdfBuffer
-                        ? h.file(pdfBuffer, 'application/pdf')
-                        : h.text('PDF 渲染失败，请检查日志。')
-                    break
-                }
-                default: {
-                    reportMessage = h.text(textReport)
-                }
-            }
-
-            await sendStatus(reportMessage)
+            await this.executeGroupAnalysisInternal(
+                session.selfId,
+                target,
+                queryDays,
+                format,
+                false,
+                true,
+                analysisResult
+            )
         }
 
         if (action !== '只分析') {
@@ -842,10 +1662,16 @@ export class AnalysisService extends Service {
     }
 
     public async executeAutoAnalysisForEnabledGroups() {
-        const enabledGroups = this.config.listenerGroups.filter(
-            (group) => group.enabled
+        const enabledGroups = await this.resolveAutoAnalysisGroups()
+        const maxConcurrentAnalyses = Math.max(
+            1,
+            this.config.maxConcurrentTasks || 3
         )
-        const maxConcurrentAnalyses = 3
+        const formats = (
+            this.config.cronOutputFormats?.length
+                ? this.config.cronOutputFormats
+                : [this.config.outputFormat || 'image']
+        ) as ('image' | 'pdf' | 'text' | 'html')[]
 
         for (
             let index = 0;
@@ -860,18 +1686,53 @@ export class AnalysisService extends Service {
             await Promise.allSettled(
                 currentBatch.map(async (group) => {
                     try {
-                        await this.executeGroupAnalysis(
+                        const incremental = this.config.incrementalEnabled
+                            ? await this.prepareIncrementalReport(group).catch(
+                                  (error) => {
+                                      this.ctx.logger.warn(
+                                          `群 ${group.guildId || group.channelId} 增量预处理失败，继续普通日报分析。`,
+                                          error
+                                      )
+                                      return undefined
+                                  }
+                              )
+                            : undefined
+                        const result = await this.executeGroupAnalysis(
                             group.selfId,
                             {
                                 guildId: group.guildId,
-                                channelId: group.channelId
+                                channelId: group.channelId,
+                                platform: group.platform
                             },
-                            this.config.cronAnalysisDays
+                            this.config.cronAnalysisDays,
+                            formats[0],
+                            false,
+                            true,
+                            incremental
                         )
-                        await this.ctx.parallel(
-                            'group-daily-analysis/auto-comic',
-                            group
-                        )
+                        if (!result) return
+                        for (const format of formats.slice(1)) {
+                            await this.executeGroupAnalysis(
+                                group.selfId,
+                                {
+                                    guildId: group.guildId,
+                                    channelId: group.channelId,
+                                    platform: group.platform
+                                },
+                                this.config.cronAnalysisDays,
+                                format,
+                                false,
+                                false,
+                                {
+                                    ...result,
+                                    tokenUsage: {
+                                        promptTokens: 0,
+                                        completionTokens: 0,
+                                        totalTokens: 0
+                                    }
+                                }
+                            )
+                        }
                     } catch (err) {
                         this.ctx.logger.error(
                             `群 ${group.guildId || group.channelId} 自动分析失败:`,
@@ -881,6 +1742,47 @@ export class AnalysisService extends Service {
                 })
             )
         }
+    }
+
+    private async resolveAutoAnalysisGroups() {
+        const configured = this.config.listenerGroups.filter((group) =>
+            isAutoAnalysisGroup(group, this.config)
+        )
+        if (!this.config.enableAllGroupsByDefault) return configured
+        if (
+            this.config.autoAnalysisGroupMode === 'whitelist' &&
+            !this.config.autoAnalysisGroups.length
+        )
+            return []
+        const discovered: typeof configured = []
+        for (const bot of this.ctx.bots) {
+            const getGuildList = (bot as any).getGuildList
+            if (typeof getGuildList !== 'function') continue
+            try {
+                const response = await getGuildList.call(bot)
+                const guilds = Array.isArray(response)
+                    ? response
+                    : response?.data || []
+                for (const guild of guilds) {
+                    const id = String(guild.id)
+                    discovered.push({
+                        platform: bot.platform,
+                        selfId: bot.selfId,
+                        channelId: id,
+                        guildId: id,
+                        enabled: true
+                    })
+                }
+            } catch (error) {
+                this.ctx.logger.warn(
+                    `发现 ${bot.platform} 群组失败，跳过该机器人的自动发现。`,
+                    error
+                )
+            }
+        }
+        return discovered.filter((group) =>
+            isAutoAnalysisGroup(group, this.config)
+        )
     }
 
     public async getUserPersona(
@@ -1055,7 +1957,45 @@ export class AnalysisService extends Service {
         messages: StoredMessage[],
         selfId: string,
         target: AnalysisTarget,
-        context?: AnalysisPromptContext
+        context?: AnalysisPromptContext,
+        resume?: Partial<
+            Pick<
+                GroupAnalysisResult,
+                'topics' | 'userTitles' | 'goldenQuotes' | 'chatQuality'
+            >
+        >,
+        checkpoint?: ModuleCheckpoint
+    ): Promise<GroupAnalysisResult> {
+        const llm = this.ctx.chatluna_group_analysis_llm
+        const task = () =>
+            this.analyzeGroupMessagesInternal(
+                messages,
+                selfId,
+                target,
+                context,
+                undefined,
+                resume,
+                checkpoint
+            )
+        if (!llm.measureUsage) return task()
+        const { value, usage } = await llm.measureUsage(task)
+        value.tokenUsage = usage
+        return value
+    }
+
+    private async analyzeGroupMessagesInternal(
+        messages: StoredMessage[],
+        selfId: string,
+        target: AnalysisTarget,
+        context?: AnalysisPromptContext,
+        existing?: GroupAnalysisResult,
+        resume?: Partial<
+            Pick<
+                GroupAnalysisResult,
+                'topics' | 'userTitles' | 'goldenQuotes' | 'chatQuality'
+            >
+        >,
+        checkpoint?: ModuleCheckpoint
     ): Promise<GroupAnalysisResult> {
         this.ctx.logger.info(`开始分析 ${messages.length} 条消息...`)
 
@@ -1067,31 +2007,104 @@ export class AnalysisService extends Service {
         // LLM analyses in parallel
         const users = Object.values(userStats)
 
-        const [topics, userTitles, goldenQuotes] = await Promise.all([
-            this.ctx.chatluna_group_analysis_llm.summarizeTopics(
-                messagesText,
-                context
-            ),
-            this.config.userTitleAnalysis
-                ? this.ctx.chatluna_group_analysis_llm.analyzeUserTitles(
-                      users,
-                      context
-                  )
-                : Promise.resolve([]),
-            this.ctx.chatluna_group_analysis_llm.analyzeGoldenQuotes(
-                messagesText,
-                this.config.maxGoldenQuotes,
-                context
-            )
-        ]).catch((error) => {
-            this.ctx.logger.error('LLM analysis failed:', error)
-            //  On LLM failure, return empty results to avoid crashing the entire analysis.
-            return [
-                [] as SummaryTopic[],
-                [] as UserTitle[],
-                [] as GoldenQuote[]
-            ] as const
-        })
+        const saveModule = <T>(
+            key: keyof NonNullable<AnalysisCheckpoint['moduleResults']>,
+            task: Promise<T>
+        ) =>
+            task.then(async (value) => {
+                if (!checkpoint) return value
+                checkpoint.write = (checkpoint.write || Promise.resolve()).then(
+                    async () => {
+                        checkpoint.payload.moduleResults = {
+                            ...(checkpoint.payload.moduleResults || {}),
+                            [key]: value
+                        }
+                        await this.saveCheckpoint(
+                            checkpoint.id,
+                            `module:${String(key)}`,
+                            checkpoint.payload
+                        )
+                    }
+                )
+                await checkpoint.write
+                return value
+            })
+
+        const [topicResult, titleResult, quoteResult, qualityResult] =
+            await Promise.allSettled([
+                existing
+                    ? Promise.resolve(existing.topics)
+                    : resume?.topics !== undefined
+                      ? Promise.resolve(resume.topics)
+                      : this.config.topicAnalysis !== false
+                        ? saveModule(
+                              'topics',
+                              this.ctx.chatluna_group_analysis_llm.summarizeTopics(
+                                  messagesText,
+                                  context
+                              )
+                          )
+                        : Promise.resolve([]),
+                existing
+                    ? Promise.resolve(existing.userTitles)
+                    : resume?.userTitles !== undefined
+                      ? Promise.resolve(resume.userTitles)
+                      : this.config.userTitleAnalysis
+                        ? saveModule(
+                              'userTitles',
+                              this.ctx.chatluna_group_analysis_llm.analyzeUserTitles(
+                                  users,
+                                  context
+                              )
+                          )
+                        : Promise.resolve([]),
+                existing
+                    ? Promise.resolve(existing.goldenQuotes)
+                    : resume?.goldenQuotes !== undefined
+                      ? Promise.resolve(resume.goldenQuotes)
+                      : this.config.goldenQuoteAnalysis !== false
+                        ? saveModule(
+                              'goldenQuotes',
+                              this.ctx.chatluna_group_analysis_llm.analyzeGoldenQuotes(
+                                  messagesText,
+                                  this.config.maxGoldenQuotes,
+                                  context
+                              )
+                          )
+                        : Promise.resolve([]),
+                existing
+                    ? Promise.resolve(existing.chatQuality)
+                    : resume?.chatQuality !== undefined
+                      ? Promise.resolve(resume.chatQuality)
+                      : this.config.chatQualityAnalysis
+                        ? saveModule(
+                              'chatQuality',
+                              this.ctx.chatluna_group_analysis_llm.analyzeChatQuality(
+                                  messagesText
+                              )
+                          )
+                        : Promise.resolve(null)
+            ])
+        const topics =
+            topicResult.status === 'fulfilled' ? topicResult.value : []
+        const userTitles =
+            titleResult.status === 'fulfilled' ? titleResult.value : []
+        const goldenQuotes =
+            quoteResult.status === 'fulfilled' ? quoteResult.value : []
+        const chatQuality =
+            qualityResult.status === 'fulfilled' ? qualityResult.value : null
+        for (const [name, result] of [
+            ['话题', topicResult],
+            ['称号', titleResult],
+            ['金句', quoteResult],
+            ['聊天质量', qualityResult]
+        ] as const) {
+            if (result.status === 'rejected')
+                this.ctx.logger.error(
+                    `${name}分析失败，保留其他模块结果。`,
+                    result.reason
+                )
+        }
 
         // Final statistics
         const sortedUsers = users.sort(
@@ -1120,6 +2133,18 @@ export class AnalysisService extends Service {
         const groupName = await this.resolveGroupName(selfId, target)
 
         const result: GroupAnalysisResult = {
+            failedModules: [
+                ['话题', topicResult],
+                ['称号', titleResult],
+                ['金句', quoteResult],
+                ['聊天质量', qualityResult]
+            ]
+                .filter(
+                    ([, item]) =>
+                        (item as PromiseSettledResult<unknown>).status ===
+                        'rejected'
+                )
+                .map(([name]) => String(name)),
             totalMessages: messages.length,
             totalChars,
             totalParticipants: users.length,
@@ -1133,6 +2158,7 @@ export class AnalysisService extends Service {
             topics,
             userTitles,
             goldenQuotes,
+            chatQuality,
             activeHoursChart: activeHoursChartHtml,
             activeHoursData: overallActiveHours,
             analysisDate: new Date().toLocaleDateString('zh-CN'),
@@ -1143,8 +2169,13 @@ export class AnalysisService extends Service {
         return result
     }
 
-    private _getBot(selfId: string) {
-        return this.ctx.bots.find((bot) => bot.selfId === selfId)
+    private _getBot(selfId: string, platform?: string) {
+        const bots = this.ctx.bots.filter(
+            (bot) =>
+                bot.selfId === selfId &&
+                (!platform || bot.platform === platform)
+        )
+        return bots.length === 1 ? bots[0] : undefined
     }
 }
 
@@ -1155,5 +2186,38 @@ declare module 'koishi' {
 
     interface Tables {
         chatluna_user_personas: PersonaRecord
+        chatluna_analysis_reports: {
+            id: string
+            platform: string
+            selfId: string
+            guildId?: string
+            channelId?: string
+            days: number
+            format: string
+            result: string
+            createdAt: Date
+            status: string
+            promptTokens: number
+            completionTokens: number
+            totalTokens: number
+        }
+        chatluna_analysis_checkpoints: {
+            id: string
+            stage: string
+            payload: string
+            updatedAt: Date
+            status: string
+        }
+        chatluna_incremental_states: {
+            id: string
+            platform: string
+            selfId: string
+            guildId?: string
+            channelId?: string
+            count: number
+            cursor?: Date
+            result?: string
+            updatedAt: Date
+        }
     }
 }
