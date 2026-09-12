@@ -334,7 +334,7 @@ body {
     display: flex;
     align-items: flex-end;
     gap: 4px;
-    height: 200px;
+    height: 260px;
     padding-bottom: 20px;
     border-bottom: 2px solid var(--art-border); /* Thicker */
 }
@@ -349,6 +349,7 @@ body {
 }
 
 .activity-bar-bar {
+    flex-shrink: 0;
     width: 100%;
     background-color: var(--art-text);
     transition: height 0.5s ease;

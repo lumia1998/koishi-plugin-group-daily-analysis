@@ -177,10 +177,13 @@ export const Config: Schema<Config> = Schema.intersect([
             .description('单次分析的最大消息数量。')
             .default(2000),
         minMessages: Schema.number()
-            .description('进行分析所需的最小消息数量。')
-            .min(10)
+            .description(
+                '群分析和群漫画共用的最低消息条数，可自定义；达到此数量即可执行，默认 50 条。'
+            )
+            .min(1)
+            .step(1)
             .max(1000)
-            .default(100),
+            .default(50),
         maxUsersInReport: Schema.number()
             .description('报告中显示的最大活跃用户数量。')
             .default(10),

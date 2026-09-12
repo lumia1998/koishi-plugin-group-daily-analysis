@@ -196,7 +196,7 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
             let height = `max(4px, ${percentage}%)`
 
             if (count === 0) {
-                height = '0px'
+                height = '0px; border: 0'
             } else if (percentage >= 70) {
                 colorVar = 'var(--accent-orange)'
             } else if (percentage >= 30) {

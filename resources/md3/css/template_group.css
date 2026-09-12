@@ -603,7 +603,7 @@ body.dark-theme {
     display: flex;
     align-items: flex-end;
     gap: 4px;
-    height: 200px;
+    height: 260px;
     background: var(--surface-container);
     border-radius: 20px;
     padding: 24px 16px 16px;
@@ -620,6 +620,7 @@ body.dark-theme {
 }
 
 .activity-bar-bar {
+    flex-shrink: 0;
     width: 100%;
     max-width: 24px;
     background: linear-gradient(to top, var(--primary), var(--secondary));

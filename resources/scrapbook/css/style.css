@@ -347,10 +347,10 @@ body {
 
 .bar-label-x {
     margin-top: 6px;
-    font-family: var(--font-hand);
+    font-family: var(--font-body);
     font-size: 0.75rem;
     color: var(--ink-primary);
-    transform: rotate(-45deg);
+    transform: none;
     transform-origin: center top;
     white-space: nowrap;
 }

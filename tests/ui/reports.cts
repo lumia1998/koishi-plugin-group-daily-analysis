@@ -160,6 +160,28 @@ async function main() {
                     )
                     const backgroundLum = luminance(background)
                     return {
+                        compressedBars: [
+                            ...document.querySelectorAll<HTMLElement>(
+                                '.activity-bar-bar'
+                            )
+                        ].some(
+                            (el) =>
+                                el.style.height.endsWith('px') &&
+                                Math.abs(
+                                    el.getBoundingClientRect().height -
+                                        parseFloat(el.style.height)
+                                ) > 1
+                        ),
+                        zeroBarBorder: [
+                            ...document.querySelectorAll<HTMLElement>(
+                                '.chart-column:not(.show-value) .bar-vertical'
+                            )
+                        ].some(
+                            (el) =>
+                                parseFloat(
+                                    getComputedStyle(el).borderTopWidth
+                                ) > 0
+                        ),
                         contrast:
                             (Math.max(foregroundLum, backgroundLum) + 0.05) /
                             (Math.min(foregroundLum, backgroundLum) + 0.05),
@@ -177,6 +199,16 @@ async function main() {
                 assert.ok(
                     metrics.width > 500,
                     `${skin}/${theme}: quality section squeezed: ${JSON.stringify(metrics)}`
+                )
+                assert.equal(
+                    metrics.compressedBars,
+                    false,
+                    `${skin}/${theme}: chart bar height distorted`
+                )
+                assert.equal(
+                    metrics.zeroBarBorder,
+                    false,
+                    `${skin}/${theme}: zero bar has a visible border`
                 )
                 assert.equal(
                     metrics.nested,

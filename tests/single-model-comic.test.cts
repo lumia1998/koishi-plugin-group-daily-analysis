@@ -7,6 +7,12 @@ import {
 } from '../src/comic-prompts'
 import { LLMService } from '../src/service/llm'
 
+test('analysis and comic minimum defaults to 50 and accepts custom counts', () => {
+    assert.equal(Config({}).minMessages, 50)
+    assert.equal(Config({ minMessages: 20 }).minMessages, 20)
+    assert.equal(Config({ minMessages: 100 }).minMessages, 100)
+})
+
 test('comic covers all topics even with the old three-topic limit saved', () => {
     const config = Config({}).comic
     const topics = Array.from({ length: 7 }, (_, i) => ({
