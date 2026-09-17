@@ -91,6 +91,19 @@ async function main() {
             {},
             headings.length + 1
         )
+        await page.evaluate(() => (window as any).addLegacySections())
+        await page.waitForFunction(
+            (count: number) =>
+                document.querySelectorAll('.k-schema-header').length === count,
+            {},
+            headings.length + 3
+        )
+        assert.deepEqual(
+            await page.$$eval(links, (nodes: Element[]) =>
+                nodes.map((node) => node.textContent)
+            ),
+            [...headings, '延迟加载设置']
+        )
         await page.evaluate(() =>
             (window as any).changePlugin('unrelated-plugin')
         )
@@ -109,14 +122,14 @@ async function main() {
         )
         await page.waitForSelector('.group-analysis-navigation')
         assert.equal(
-            await page.$$eval('.reference-links a', (nodes: Element[]) =>
-                nodes.every(
-                    (node) =>
-                        node.getAttribute('href')?.startsWith('https://') &&
-                        node.getAttribute('rel')?.includes('noopener')
+            await page.$$eval(links, (nodes: Element[]) =>
+                nodes.some((node) =>
+                    ['过滤器设置', '运行日志'].includes(
+                        node.textContent || ''
+                    )
                 )
             ),
-            true
+            false
         )
         await page.evaluate(() => window.scrollTo(0, 0))
         await page.mouse.move(0, 0)

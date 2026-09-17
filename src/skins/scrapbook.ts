@@ -21,7 +21,12 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
 
     formatGoldenQuotes(quotes: GroupAnalysisResult['goldenQuotes']): string {
         if (!quotes || quotes.length === 0) {
-            return ''
+            return `
+            <section class="quotes-section empty-analysis-section">
+                <div class="section-title">群贤毕至 Bible Quotes</div>
+                <div class="empty-state">本次未生成可展示的群聊金句。</div>
+            </section>
+            `
         }
 
         const itemsHtml = quotes
@@ -64,7 +69,12 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
 
     formatUserTitles(userTitles: GroupAnalysisResult['userTitles']): string {
         if (!userTitles || userTitles.length === 0) {
-            return ''
+            return `
+            <section class="user-section empty-analysis-section">
+                <div class="section-title">群友画像 Portraits</div>
+                <div class="empty-state">本次未生成可展示的群友称号。</div>
+            </section>
+            `
         }
 
         const itemsHtml = userTitles
@@ -109,7 +119,12 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
 
     formatTopics(topics: GroupAnalysisResult['topics']): string {
         if (!topics || topics.length === 0) {
-            return ''
+            return `
+            <section class="topic-section empty-analysis-section">
+                <div class="section-title">今日话题 Topics</div>
+                <div class="empty-state">本次未生成有效话题，请检查文本模型的并发与日志。</div>
+            </section>
+            `
         }
 
         const itemsHtml = topics

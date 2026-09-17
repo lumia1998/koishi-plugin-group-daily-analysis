@@ -47,7 +47,7 @@ type AnalysisCheckpoint = {
     selfId: string
     target: AnalysisTarget
     days: number
-    format: 'image' | 'pdf' | 'text'
+    format: 'image' | 'pdf' | 'text' | 'html'
     startTime: string
     endTime: string
     result?: GroupAnalysisResult
@@ -65,6 +65,8 @@ type ModuleCheckpoint = {
     payload: AnalysisCheckpoint
     write?: Promise<void>
 }
+
+const MAX_GOLDEN_QUOTES = 3
 
 export class AnalysisService extends Service {
     static readonly inject = [
@@ -831,7 +833,7 @@ export class AnalysisService extends Service {
         selfId: string,
         target: AnalysisTarget,
         days: number,
-        outputFormat?: 'image' | 'pdf' | 'text',
+        outputFormat?: 'image' | 'pdf' | 'text' | 'html',
         triggerComic = true,
         suppliedResult?: GroupAnalysisResult,
         recovery?: { id: string; payload: AnalysisCheckpoint }
@@ -856,7 +858,7 @@ export class AnalysisService extends Service {
         selfId: string,
         target: AnalysisTarget,
         days: number,
-        outputFormat?: 'image' | 'pdf' | 'text',
+        outputFormat?: 'image' | 'pdf' | 'text' | 'html',
         triggerComic = true,
         suppliedResult?: GroupAnalysisResult,
         recovery?: { id: string; payload: AnalysisCheckpoint }
@@ -984,6 +986,15 @@ export class AnalysisService extends Service {
                     archivePayload = pdfBuffer
                     break
                 }
+                case 'html': {
+                    const reportPath =
+                        await this.ctx.chatluna_group_analysis_renderer.renderGroupAnalysisHtml(
+                            analysisResult,
+                            this.config
+                        )
+                    message = h.file(reportPath)
+                    break
+                }
                 default: {
                     message = isQQOfficialPlatform(bot?.platform)
                         ? h('markdown', {
@@ -1052,7 +1063,7 @@ export class AnalysisService extends Service {
         session: Session,
         target: AnalysisTarget,
         query: string,
-        outputFormat?: 'image' | 'pdf' | 'text'
+        outputFormat?: 'image' | 'pdf' | 'text' | 'html'
     ) {
         const limiter =
             this.taskLimiter ||
@@ -1066,7 +1077,7 @@ export class AnalysisService extends Service {
         session: Session,
         target: AnalysisTarget,
         query: string,
-        outputFormat?: 'image' | 'pdf' | 'text'
+        outputFormat?: 'image' | 'pdf' | 'text' | 'html'
     ) {
         const bot = this._getBot(session.selfId, session.platform)
         target = { ...target, platform: session.platform }
@@ -1223,7 +1234,7 @@ export class AnalysisService extends Service {
             this.config.cronOutputFormats?.length
                 ? this.config.cronOutputFormats
                 : [this.config.outputFormat || 'image']
-        ) as ('image' | 'pdf' | 'text')[]
+        ) as ('image' | 'pdf' | 'text' | 'html')[]
 
         for (
             let index = 0;
@@ -1600,7 +1611,7 @@ export class AnalysisService extends Service {
                             'goldenQuotes',
                             this.ctx.chatluna_group_analysis_llm.analyzeGoldenQuotes(
                                 messagesText,
-                                this.config.maxGoldenQuotes,
+                                MAX_GOLDEN_QUOTES,
                                 context
                             )
                         ),

@@ -62,7 +62,7 @@ export function applySkinAliasStyles(template: string, skin: string) {
         /<\/head>/i,
         `<style data-report-layout>
         .quality-section { grid-column: 1 / -1; min-width: 0; margin: 28px 0; padding: 24px; border: 1px solid currentColor; border-radius: 16px; box-sizing: border-box; }
-        .quality-section:has(> .empty-state) { display: none; }
+        .quality-section .empty-state, .empty-analysis-section .empty-state { padding: 14px; border: 1px dashed currentColor; border-radius: 10px; opacity: .78; }
         .quality-section h2 { font-size: 24px; margin: 0 0 18px; }
         .quality-review h3 { font-size: 20px; margin: 0 0 12px; }
         .quality-review p { line-height: 1.7; margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }

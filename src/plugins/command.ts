@@ -141,7 +141,7 @@ export function apply(ctx: Context, config: Config) {
         { authority: 2 }
     )
         .alias('group-analysis.redraw')
-        .option('format', '-f <format:string> 输出 image/pdf/text')
+        .option('format', '-f <format:string> 输出 image/pdf/text/html')
         .action(async ({ session, options }, reportId) => {
             if (session.isDirect) return '请在目标群聊中重绘历史报告。'
             if (!checkGroup(session)) return '本群未启用分析功能。'
@@ -164,15 +164,25 @@ export function apply(ctx: Context, config: Config) {
             } catch {
                 return '历史报告数据损坏。'
             }
-            const storedFormat = ['image', 'pdf', 'text'].includes(row.format)
+            const storedFormat = ['image', 'pdf', 'text', 'html'].includes(
+                row.format
+            )
                 ? row.format
                 : config.outputFormat
             const format = (options as any)?.format || storedFormat
             if (
                 (options as any)?.format &&
-                !['image', 'pdf', 'text'].includes(format)
+                !['image', 'pdf', 'text', 'html'].includes(format)
             )
-                return '输出格式必须是 image、pdf 或 text。'
+                return '输出格式必须是 image、pdf、text 或 html。'
+            if (format === 'html') {
+                const file =
+                    await ctx.chatluna_group_analysis_renderer.renderGroupAnalysisHtml(
+                        result,
+                        config
+                    )
+                return h.file(file)
+            }
             if (format === 'pdf') {
                 const pdf =
                     await ctx.chatluna_group_analysis_renderer.renderGroupAnalysisToPdf(

@@ -57,6 +57,7 @@ let intersection: IntersectionObserver | undefined
 let view: HTMLElement | undefined
 const assignedIds = new Map<HTMLElement, string>()
 let nextId = 0
+const excludedSectionTitles = new Set(['过滤器设置', '运行日志'])
 
 function cleanup() {
     mutation?.disconnect()
@@ -75,7 +76,9 @@ function collect() {
         ...view.querySelectorAll<HTMLElement>('.k-schema-header')
     ].filter(
         (element) =>
-            !navigation.value?.contains(element) && element.textContent?.trim()
+            !navigation.value?.contains(element) &&
+            !!element.textContent?.trim() &&
+            !excludedSectionTitles.has(element.textContent.trim())
     )
     if (
         headers.length === sections.value.length &&

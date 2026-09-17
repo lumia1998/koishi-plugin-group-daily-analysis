@@ -6,12 +6,16 @@ const headings: string[] = await fetch('/test-headings.json').then((r) =>
 )
 const plugin = ref('group-daily-analysis')
 const delayed = ref(false)
+const legacySections = ref(false)
 Object.assign(window, {
     changePlugin: (name: string) => {
         plugin.value = name
     },
     addSection: () => {
         delayed.value = true
+    },
+    addLegacySections: () => {
+        legacySections.value = true
     }
 })
 createApp({
@@ -23,7 +27,10 @@ createApp({
                 h(Navigation),
                 ...[
                     ...headings,
-                    ...(delayed.value ? ['延迟加载设置'] : [])
+                    ...(delayed.value ? ['延迟加载设置'] : []),
+                    ...(legacySections.value
+                        ? ['过滤器设置', '运行日志']
+                        : [])
                 ].map((title) =>
                     h('section', [
                         h('h2', { class: 'k-schema-header' }, title),

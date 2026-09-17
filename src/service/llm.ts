@@ -18,6 +18,9 @@ import { ConcurrencyLimiter } from './limiter'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { validateAnalysisOutput } from './validation'
 
+const MAX_TOPICS = 5
+const MAX_USER_TITLES = 6
+
 export class LLMService extends Service {
     private usageScope = new AsyncLocalStorage<{
         promptTokens: number
@@ -241,7 +244,7 @@ export class LLMService extends Service {
         const prompt = this.fillAnalysisPrompt(
             this.config.promptTopic
                 .replace('{messages}', messagesText)
-                .replace('{maxTopics}', this.config.maxTopics.toString()),
+                .replace('{maxTopics}', String(MAX_TOPICS)),
             context
         )
         return this._callLLM<SummaryTopic[]>(
@@ -253,7 +256,7 @@ export class LLMService extends Service {
             Array.isArray(data)
                 ? data
                       .filter((item) => item && typeof item.topic === 'string')
-                      .slice(0, this.config.maxTopics)
+                      .slice(0, MAX_TOPICS)
                 : []
         )
     }
@@ -264,7 +267,7 @@ export class LLMService extends Service {
     ): Promise<UserTitle[]> {
         const userSummaries = users
             .sort((a, b) => b.messageCount - a.messageCount)
-            .slice(0, this.config.maxUserTitles)
+            .slice(0, MAX_USER_TITLES)
             .map(
                 (user) =>
                     `- ${user.nickname} (QQ:${user.userId}): ` +
@@ -286,7 +289,7 @@ export class LLMService extends Service {
             Array.isArray(data)
                 ? data
                       .filter((item) => item && typeof item.name === 'string')
-                      .slice(0, this.config.maxUserTitles)
+                      .slice(0, MAX_USER_TITLES)
                 : []
         )
     }

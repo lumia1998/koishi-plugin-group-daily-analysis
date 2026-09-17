@@ -322,6 +322,78 @@ export class RendererService extends Service {
         return page
     }
 
+    public async renderGroupAnalysisHtml(
+        data: GroupAnalysisResult,
+        config: Config = this.config
+    ): Promise<string> {
+        return this.limiter.run(async () => {
+            let theme = config.theme
+            if (theme === 'auto') {
+                const hour = new Date().getHours()
+                theme = hour >= 19 || hour < 6 ? 'dark' : 'light'
+            }
+            const skin = config.skin || 'md3'
+            const templatePath = this.getSkinPath('template_group.html')
+            let templateHtml = await fs.readFile(templatePath, 'utf-8')
+
+            // 将本地皮肤样式内联，使导出的 HTML 能独立打开。
+            for (const match of templateHtml.matchAll(/<link\b[^>]*>/gi)) {
+                if (!/rel=["']stylesheet["']/i.test(match[0])) continue
+                const href = match[0].match(/href=["']([^"']+)["']/i)?.[1]
+                if (!href || /^(?:[a-z]+:|\/\/)/i.test(href)) continue
+                const css = await fs.readFile(
+                    path.resolve(path.dirname(templatePath), href),
+                    'utf-8'
+                )
+                templateHtml = templateHtml.replace(
+                    match[0],
+                    () => `<style>${css}</style>`
+                )
+            }
+
+            const filledHtml = renderTemplate(
+                applySkinAliasStyles(templateHtml, skin),
+                {
+                    groupName: data.groupName,
+                    analysisDate: data.analysisDate,
+                    totalMessages: String(data.totalMessages),
+                    totalParticipants: String(data.totalParticipants),
+                    totalChars: String(data.totalChars),
+                    mostActivePeriod: data.mostActivePeriod,
+                    emojiCount: String(data.emojiCount || 0),
+                    userStats: formatUserStats(data.userStats, skin),
+                    topics: formatTopics(data.topics || [], skin),
+                    userTitles: formatUserTitles(data.userTitles || [], skin),
+                    activeHoursChart: generateActiveHoursChart(
+                        data.activeHoursData || {},
+                        skin
+                    ),
+                    goldenQuotes: formatGoldenQuotes(
+                        data.goldenQuotes || [],
+                        skin
+                    ),
+                    chatQuality: formatChatQuality(data.chatQuality),
+                    theme,
+                    dynamicAvatarUrl:
+                        data.userStats?.[0]?.avatar ||
+                        'https://cravatar.cn/avatar/00000000000000000000000000000000?d=mp'
+                }
+            ).replace(
+                /<body([^>]*)>/,
+                (_match, attrs) => `<body${attrs} data-skin="${skin}">`
+            )
+            const outputDir = path.resolve(
+                this.ctx.baseDir,
+                'data/chatluna/group_analysis/reports'
+            )
+            await fs.mkdir(outputDir, { recursive: true })
+            const filename = `group-analysis-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`
+            const outputPath = path.join(outputDir, filename)
+            await fs.writeFile(outputPath, filledHtml, 'utf-8')
+            return outputPath
+        })
+    }
+
     public async renderUserPersona(
         data: UserPersonaProfile,
         username: string,
