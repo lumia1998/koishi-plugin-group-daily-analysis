@@ -416,6 +416,7 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
             }
         ],
         command(name: string, _description: string, options: any) {
+            if (name.startsWith('用户画像.漫画')) return { action() {} }
             assert.equal(name, '群漫画 [days:number]')
             assert.equal(options.checkArgCount, true)
             return {

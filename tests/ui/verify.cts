@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { Config } from '../../src/config'
+import { verifyReports } from './reports.cts'
 
 async function main() {
     const { createServer } = require('vite')
@@ -71,6 +72,20 @@ async function main() {
             headings
         )
         await page.click(`${links}:nth-child(5)`)
+        assert.equal(
+            await page.$eval(
+                '.k-schema-left h3 > span:not(.prefix)',
+                (node: HTMLElement) => node.dataset.configLabel
+            ),
+            '详细日志'
+        )
+        assert.equal(
+            await page.$eval(
+                '.k-schema-left h3 > span:not(.prefix)',
+                (node: Element) => getComputedStyle(node, '::after').content
+            ),
+            '"详细日志"'
+        )
         await page.waitForFunction(() => {
             const top = document
                 .querySelectorAll('.k-schema-header')[4]
@@ -117,6 +132,20 @@ async function main() {
             ),
             0
         )
+        assert.equal(
+            await page.$$eval(
+                '.group-analysis-config-label, .group-analysis-config-prefix',
+                (nodes: Element[]) => nodes.length
+            ),
+            0
+        )
+        assert.equal(
+            await page.$eval(
+                '.k-schema-left h3 > span:not(.prefix)',
+                (node: Element) => node.getAttribute('aria-label')
+            ),
+            null
+        )
         await page.evaluate(() =>
             (window as any).changePlugin('group-analysis')
         )
@@ -124,9 +153,7 @@ async function main() {
         assert.equal(
             await page.$$eval(links, (nodes: Element[]) =>
                 nodes.some((node) =>
-                    ['过滤器设置', '运行日志'].includes(
-                        node.textContent || ''
-                    )
+                    ['过滤器设置', '运行日志'].includes(node.textContent || '')
                 )
             ),
             false
@@ -162,6 +189,7 @@ async function main() {
         console.log(
             `UI passed: ${headings.length} actual schema sections, click/scroll highlight, dynamic sections, plugin isolation, cleanup, links, desktop/dark/mobile. Screenshots: ${path.resolve('artifacts/navigation')}`
         )
+        await verifyReports(browser)
     } finally {
         await browser.close()
         await server.close()

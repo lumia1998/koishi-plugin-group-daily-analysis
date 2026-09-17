@@ -575,9 +575,18 @@ test('module checkpoints save successful LLM outputs and rerun only the failed m
         [message('a', Date.now())],
         'bot',
         { channelId: 'g' },
-        undefined,
+        {
+            timeRange: {
+                start: new Date(checkpoint.payload.startTime),
+                end: new Date(checkpoint.payload.endTime)
+            }
+        },
         undefined,
         checkpoint
+    )
+    assert.equal(
+        first.analysisDate,
+        `${new Date(checkpoint.payload.startTime).toLocaleString('zh-CN')} 至 ${new Date(checkpoint.payload.endTime).toLocaleString('zh-CN')}`
     )
     assert.deepEqual(first.failedModules, ['称号'])
     assert.ok(checkpoint.payload.moduleResults.topics)

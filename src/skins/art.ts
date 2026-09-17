@@ -7,7 +7,7 @@ import { GroupAnalysisResult, UserStats } from '../types'
  */
 export class ArtSkinRenderer implements SkinRenderer {
     readonly id = 'art'
-    readonly name = 'Art Style'
+    readonly name = '艺术风格'
     readonly containerSelector = '.container'
 
     formatUserStats(userStats: UserStats[]): string {
@@ -19,7 +19,7 @@ export class ArtSkinRenderer implements SkinRenderer {
             .map(
                 (user) => `
       <div class="user-stat-card">
-        <img src="${getAvatarUrl(user.userId)}" alt="avatar" class="avatar">
+        <img src="${getAvatarUrl(user.userId)}" alt="头像" class="avatar">
         <div class="user-details">
           <div class="nickname">${user.nickname}</div>
           <div class="stats-grid">
@@ -64,7 +64,7 @@ export class ArtSkinRenderer implements SkinRenderer {
             .map(
                 (title) => `
       <div class="title-card">
-        <img src="${getAvatarUrl(title.id)}" alt="avatar" class="avatar">
+        <img src="${getAvatarUrl(title.id)}" alt="头像" class="avatar">
         <div class="title-details">
           <div class="nickname">${title.name}</div>
           <div class="title-badge">${title.mbti && title.mbti !== 'N/A' ? `${title.title} | ${title.mbti}` : title.title}</div>
@@ -86,7 +86,7 @@ export class ArtSkinRenderer implements SkinRenderer {
                 (topic) => `
          <div class="topic-card">
            <div class="topic-title">${topic.topic}</div>
-           <div class="topic-contributors">CONTRIBUTORS: ${topic.contributors.join(', ')}</div>
+           <div class="topic-contributors">参与者： ${topic.contributors.join(', ')}</div>
            <p class="topic-detail">${topic.detail}</p>
          </div>
        `
@@ -120,7 +120,7 @@ export class ArtSkinRenderer implements SkinRenderer {
                     : `style="height: 0px !important;"`
 
             chartBars.push(`
-                <div class="activity-bar" title="${i}:00 - ${count} messages (${percentage}%)">
+                <div class="activity-bar" title="${i}:00 - ${count} 条消息 (${percentage}%)">
                     <div class="activity-bar-count">${count > 0 ? count : ''}</div>
                     <div class="activity-bar-bar" ${barStyle}></div>
                     <span class="activity-bar-label">${String(i).padStart(2, '0')}</span>
@@ -134,7 +134,7 @@ export class ArtSkinRenderer implements SkinRenderer {
                     ${chartBars.join('')}
                 </div>
                 <div class="chart-legend">
-                    24H ACTIVITY DISTRIBUTION (PEAK: ${maxCount})
+                    24 小时活跃分布（峰值： ${maxCount})
                 </div>
             </div>
         `

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>人物藏书档案</title>
+        <style>
+            * {
+                box-sizing: border-box;
+            }
+            body {
+                margin: 0;
+                padding: 28px;
+                font:
+                    18px/1.75 'Microsoft YaHei',
+                    sans-serif;
+                color: var(--ink);
+                background: var(--back);
+            }
+            .profile {
+                width: 100%;
+                max-width: 1000px;
+                margin: auto;
+                padding: 40px;
+                background: var(--paper);
+                overflow: hidden;
+            }
+            h1 {
+                font-size: 42px;
+                line-height: 1.3;
+                margin: 10px 0;
+            }
+            h2 {
+                font-size: 23px;
+                margin: 0 0 16px;
+            }
+            p {
+                white-space: pre-wrap;
+                margin: 10px 0;
+                overflow-wrap: anywhere;
+            }
+            header,
+            .identity {
+                display: flex;
+                align-items: center;
+                gap: 28px;
+            }
+            .portrait {
+                width: 142px;
+                height: 142px;
+                object-fit: cover;
+                flex-shrink: 0;
+            }
+            .columns {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                gap: 24px;
+            }
+            section {
+                min-width: 0;
+                margin: 24px 0;
+                padding: 24px;
+                border: 1px solid var(--line);
+            }
+            .tags {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .tags > * {
+                max-width: 100%;
+                overflow-wrap: anywhere;
+            }
+            .records {
+                overflow-wrap: anywhere;
+            }
+            .records > * {
+                margin: 12px 0;
+            }
+            footer {
+                margin-top: 32px;
+                padding-top: 18px;
+                border-top: 1px solid var(--line);
+                font-size: 14px;
+            }
+            .empty-state,
+            .empty-news {
+                opacity: 0.7;
+            }
+            .chip,
+            .tag,
+            .news-tag,
+            .washi-tape-tag {
+                display: inline-block;
+                padding: 6px 12px;
+                border: 1px solid var(--line);
+            }
+            @media (max-width: 650px) {
+                body {
+                    padding: 12px;
+                }
+                .profile {
+                    padding: 22px;
+                }
+                .columns {
+                    grid-template-columns: 1fr;
+                }
+                header,
+                .identity {
+                    flex-wrap: wrap;
+                }
+                h1 {
+                    font-size: 32px;
+                }
+            }
+            :root {
+                --ink: #493d2e;
+                --back: #e8dfcd;
+                --paper: #fbf3df;
+                --line: #aa925d;
+            }
+            .profile {
+                border: 9px double #9c8452;
+                border-radius: 120px 120px 12px 12px;
+            }
+            .book-title {
+                text-align: center;
+                padding: 24px 0;
+                font:
+                    30px 'STSong',
+                    serif;
+                letter-spacing: 8px;
+            }
+            header {
+                justify-content: center;
+                flex-direction: column;
+                text-align: center;
+            }
+            .portrait {
+                width: 180px;
+                height: 210px;
+                border-radius: 50% 50% 35% 35%;
+                outline: 2px solid #ad925a;
+                outline-offset: 8px;
+            }
+            h1,
+            h2 {
+                font-family: 'STSong', serif;
+            }
+            section {
+                border: 0;
+                border-top: 1px solid #aa925d;
+                padding: 24px 8px;
+            }
+            h2::before {
+                content: '❧ ';
+                color: #8d784b;
+            }
+            .chip {
+                border-radius: 50% 50% 8px 8px;
+            }
+            .dark-theme {
+                --ink: #f3e6c7;
+                --back: #211c17;
+                --paper: #30291f;
+                --line: #a58c55;
+            }
+        </style>
+    </head>
+    <body class="${theme}-theme">
+        <main class="profile container" data-profile-theme="art_nouveau">
+            <div class="book-title">人物藏书 · 长期档案</div>
+            <header>
+                <img class="portrait" src="${avatar}" alt="用户头像" />
+                <div>
+                    <h1>${username}</h1>
+                    <p>用户编号 ${userId}</p>
+                    <p>最近更新 ${analysisDate}</p>
+                </div>
+            </header>
+            <section class="">
+                <h2>卷首 · 人物摘要</h2>
+                <p>${summary}</p>
+            </section>
+            <div class="columns">
+                <section class="">
+                    <h2>性情枝叶</h2>
+                    <div class="tags">${keyTraits}</div>
+                </section>
+                <section class="">
+                    <h2>兴趣花园</h2>
+                    <div class="tags">${interests}</div>
+                </section>
+            </div>
+            <section class="">
+                <h2>言谈笔记</h2>
+                <p>${communicationStyle}</p>
+            </section>
+            <section class="">
+                <h2>引文与事实依据</h2>
+                <div class="records">${evidence}</div>
+            </section>
+            <footer>
+                长期用户画像 · 基于已积累的观察记录 · 群友称号仅代表本期表现
+            </footer>
+        </main>
+    </body>
+</html>

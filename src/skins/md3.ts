@@ -7,7 +7,7 @@ import { GroupAnalysisResult, UserStats } from '../types'
  */
 export class Md3SkinRenderer implements SkinRenderer {
     readonly id = 'md3'
-    readonly name = 'Material Design 3'
+    readonly name = '物料设计'
     readonly containerSelector = '.container'
 
     formatUserStats(userStats: UserStats[]): string {
@@ -19,7 +19,7 @@ export class Md3SkinRenderer implements SkinRenderer {
             .map(
                 (user) => `
       <div class="user-stat-card">
-        <img src="${getAvatarUrl(user.userId)}" alt="avatar" class="avatar">
+        <img src="${getAvatarUrl(user.userId)}" alt="头像" class="avatar">
         <div class="user-details">
           <div class="nickname">${user.nickname}</div>
           <div class="stats-grid">
@@ -64,7 +64,7 @@ export class Md3SkinRenderer implements SkinRenderer {
             .map(
                 (title) => `
       <div class="title-card">
-        <img src="${getAvatarUrl(title.id)}" alt="avatar" class="avatar">
+        <img src="${getAvatarUrl(title.id)}" alt="头像" class="avatar">
         <div class="title-details">
           <div class="nickname">${title.name}</div>
           <div class="title-badge">${title.mbti && title.mbti !== 'N/A' ? `${title.title} | ${title.mbti}` : title.title}</div>

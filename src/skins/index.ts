@@ -4,6 +4,7 @@ import { AnimeSkinRenderer } from './anime'
 import { NewspaperSkinRenderer } from './newspaper'
 import { ArtSkinRenderer } from './art'
 import { ScrapbookSkinRenderer } from './scrapbook'
+import { escapeSkinData } from './escape'
 
 export const skinSourceMap: Record<string, string> = {
     simple: 'md3',
@@ -27,18 +28,22 @@ export const skinAliasStyles: Record<string, string> = {
         body[data-skin="simple"] .container { border-radius: 8px; box-shadow: none; }
     `,
     ATRI: `
+        body[data-skin="ATRI"] { --color-primary:#4ca7c9; --color-secondary:#a8d8ea; --color-accent:#459abb; --color-text:#214c63; --color-text-light:#387d99; --color-bg:#e8f7fc; --color-card:#f8fdff; }
         body[data-skin="ATRI"] { background: linear-gradient(145deg, #fff7e7, #dff7ff); color: #24495a; }
         body[data-skin="ATRI"] .nahida-container { filter: saturate(.9); }
     `,
     BlueArchive: `
+        body[data-skin="BlueArchive"] { --color-primary:#55bde6; --color-secondary:#b9d8ec; --color-accent:#1976aa; --color-text:#21466b; --color-text-light:#467493; --color-bg:#e8f5ff; --color-card:#fff; }
         body[data-skin="BlueArchive"] { background: linear-gradient(145deg, #e9f5ff, #f4edff); color: #263b68; }
         body[data-skin="BlueArchive"] .nahida-container { border-color: #8ebdf0; }
     `,
     HatsuneMiku: `
+        body[data-skin="HatsuneMiku"] { --color-primary:#43c7bc; --color-secondary:#78dcd3; --color-accent:#ef70ac; --color-text:#155b68; --color-text-light:#317f86; --color-bg:#dffbfa; --color-card:#f6fffc; }
         body[data-skin="HatsuneMiku"] { background: linear-gradient(145deg, #dffbfa, #f4ecff); color: #155b68; }
         body[data-skin="HatsuneMiku"] .nahida-container { border-color: #48c9c5; }
     `,
     retro_futurism: `
+        body[data-skin="retro_futurism"] { --bg-paper:#081c2a; --color-ink:#c4fce8; --color-ink-light:#b1ddce; --color-ink-faint:#8bc0b1; --color-accent:#ffc876; --color-accent-secondary:#66c8a9; --border-color:#66c8a9; --border-light:#3c746e; }
         body[data-skin="retro_futurism"] { background: #07111d; color: #9fffe0; }
         body[data-skin="retro_futurism"] .paper-container { border: 1px solid #3fffc1; background: #081c2a; }
     `,
@@ -51,13 +56,16 @@ export const skinAliasStyles: Record<string, string> = {
         body[data-skin="spring_festival"] .container { border: 2px solid #d77b45; }
     `,
     hack: `
+        body[data-skin="hack"] { --bg-paper:#000; --color-ink:#91f3a0; --color-ink-light:#91cf9b; --color-ink-faint:#6da776; --color-accent:#d7dc85; --color-accent-secondary:#91f3a0; --border-color:#599f6c; --border-light:#315a3d; }
         body[data-skin="hack"] { background: #050505; color: #50ff50; font-family: monospace; }
         body[data-skin="hack"] .paper-container { border: 1px solid #50ff50; background: #000; }
     `
 }
 
 export function applySkinAliasStyles(template: string, skin: string) {
-    const css = skinAliasStyles[skin]
+    const css = template.includes('data-profile-theme=')
+        ? ''
+        : skinAliasStyles[skin]
     return template.replace(
         /<\/head>/i,
         `<style data-report-layout>
@@ -89,6 +97,8 @@ export function applySkinAliasStyles(template: string, skin: string) {
         body[data-report="persona"] p, body[data-report="persona"] h1,
         body[data-report="persona"] .profile-name, body[data-report="persona"] .article-text { overflow-wrap: anywhere; }
         .bubble-reason { margin-top: 12px; padding-top: 12px; border-top: 1px dashed currentColor; line-height: 1.7; overflow-wrap: anywhere; }
+        .header-meta { max-width: 48%; overflow-wrap: anywhere; }
+        .date-badge { position: static !important; display: table; margin: 16px auto 0; max-width: 100%; overflow-wrap: anywhere; }
         body[data-skin="scrapbook"] .quality-section, body[data-skin="spring_festival"] .quality-section { background: #fffdf7; color: #40352d; box-shadow: 5px 5px 0 #e5d4f0; }
         @media (max-width: 600px) { .quality-dimensions { grid-template-columns: 1fr; } }
         </style>${
@@ -96,7 +106,7 @@ export function applySkinAliasStyles(template: string, skin: string) {
                 ? `<style data-skin-alias="${skin}">${css}
         body.dark-theme[data-skin="simple"] { background: #18191c; color: #ececf2; }
         body.dark-theme[data-skin="ATRI"], body.dark-theme[data-skin="BlueArchive"],
-        body.dark-theme[data-skin="HatsuneMiku"] { background: #102b2c; color: #e0f7fa; }
+        body.dark-theme[data-skin="HatsuneMiku"] { background: #102b2c; color: #e0f7fa; --color-text:#e0f7fa; --color-text-light:#b8dfec; --color-card:#163847; --color-bg:#102b2c; }
         body.dark-theme[data-skin="art_nouveau"] { background: #211c17; color: #f5e6ce; }
         </style>`
                 : ''
@@ -139,6 +149,23 @@ class SkinRegistry {
      * @param skin Skin renderer instance
      */
     register(skin: SkinRenderer): void {
+        // 统一信任边界：皮肤只接收已转义的文本，返回值才是可信 HTML。
+        for (const method of [
+            'formatUserStats',
+            'formatGoldenQuotes',
+            'formatUserTitles',
+            'formatTopics',
+            'formatTags',
+            'formatEvidence'
+        ] as const) {
+            const original = skin[method]?.bind(skin)
+            if (original) {
+                Object.defineProperty(skin, method, {
+                    value: (data: never) => original(escapeSkinData(data)),
+                    configurable: true
+                })
+            }
+        }
         this.skins.set(skin.id, skin)
     }
 

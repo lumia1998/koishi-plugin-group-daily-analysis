@@ -21,7 +21,7 @@ export class NewspaperSkinRenderer implements SkinRenderer {
           <div class="news-profile">
             <div class="profile-rank">NO.${index + 1}</div>
             <div class="profile-main">
-                <img src="${getAvatarUrl(user.userId)}" alt="avatar" class="profile-avatar">
+                <img src="${getAvatarUrl(user.userId)}" alt="头像" class="profile-avatar">
                 <div class="profile-info">
                     <div class="profile-name">${user.nickname}</div>
                     <div class="profile-data">
@@ -135,7 +135,7 @@ export class NewspaperSkinRenderer implements SkinRenderer {
 
     formatTags(tags: string[] | undefined): string {
         if (!tags || tags.length === 0) {
-            return ''
+            return '<div class="empty-news">暂无记录</div>'
         }
 
         return tags

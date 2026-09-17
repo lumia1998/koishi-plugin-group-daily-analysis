@@ -77,5 +77,5 @@ export interface SkinRenderer {
  * @returns Avatar URL
  */
 export function getAvatarUrl(userId: number | string): string {
-    return `http://q1.qlogo.cn/g?b=qq&nk=${userId}&s=640`
+    return `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(userId)}&s=640`
 }

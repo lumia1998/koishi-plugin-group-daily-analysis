@@ -1,5 +1,6 @@
 import { createApp, h, provide, ref } from 'vue'
 import Navigation from '../../client/ConfigNavigation.vue'
+import { configLabels } from '../../client/config-labels'
 
 const headings: string[] = await fetch('/test-headings.json').then((r) =>
     r.json()
@@ -25,12 +26,20 @@ createApp({
             h('main', { class: 'plugin-view' }, [
                 h('h1', '群分析 · 插件配置'),
                 h(Navigation),
+                h(
+                    'div',
+                    { class: 'k-schema-left' },
+                    Object.keys(configLabels).map((key) =>
+                        h('h3', [
+                            h('span', { class: 'prefix' }, 'comic.'),
+                            h('span', key)
+                        ])
+                    )
+                ),
                 ...[
                     ...headings,
                     ...(delayed.value ? ['延迟加载设置'] : []),
-                    ...(legacySections.value
-                        ? ['过滤器设置', '运行日志']
-                        : [])
+                    ...(legacySections.value ? ['过滤器设置', '运行日志'] : [])
                 ].map((title) =>
                     h('section', [
                         h('h2', { class: 'k-schema-header' }, title),

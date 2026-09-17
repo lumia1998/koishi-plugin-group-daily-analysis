@@ -8,22 +8,27 @@ import { GroupAnalysisResult, UserStats } from '../types'
  */
 export class ScrapbookSkinRenderer implements SkinRenderer {
     readonly id = 'scrapbook'
-    readonly name = 'Scrapbook'
+    readonly name = '手账风格'
     readonly containerSelector = '.container'
 
     formatUserStats(userStats: UserStats[]): string {
-        // The scrapbook design doesn't have a dedicated user stats section like rankings in the main view
-        // It relies on "User Titles" (Portraits) for user display.
-        // If we need to display a simple list, we can implement it, but standard AstrBot scrapbook doesn't seem to have a plain ranking list.
-        // We will return empty or a simple hidden block to satisfy the interface.
-        return ''
+        if (!userStats?.length)
+            return '<div class="empty-state">暂无活跃用户记录</div>'
+        return userStats
+            .map(
+                (user, index) => `
+            <div class="user-card"><strong>${index + 1}. ${user.nickname}</strong>
+            <p>发言 ${user.messageCount} 条 · 字数 ${user.charCount}</p></div>
+        `
+            )
+            .join('')
     }
 
     formatGoldenQuotes(quotes: GroupAnalysisResult['goldenQuotes']): string {
         if (!quotes || quotes.length === 0) {
             return `
             <section class="quotes-section empty-analysis-section">
-                <div class="section-title">群贤毕至 Bible Quotes</div>
+                <div class="section-title">群聊金句</div>
                 <div class="empty-state">本次未生成可展示的群聊金句。</div>
             </section>
             `
@@ -60,7 +65,7 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
                 <svg class="doodle" viewBox="0 0 24 24">
                     <path d="M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z" />
                 </svg>
-                群贤毕至 Bible Quotes
+                群聊金句
             </div>
             ${itemsHtml}
         </div>
@@ -71,7 +76,7 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
         if (!userTitles || userTitles.length === 0) {
             return `
             <section class="user-section empty-analysis-section">
-                <div class="section-title">群友画像 Portraits</div>
+                <div class="section-title">本期群友称号</div>
                 <div class="empty-state">本次未生成可展示的群友称号。</div>
             </section>
             `
@@ -108,7 +113,7 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
                 <svg class="doodle" viewBox="0 0 24 24">
                     <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
                 </svg>
-                群友画像 Portraits
+                本期群友称号
             </div>
             <div class="masonry-grid">
                 ${itemsHtml}
@@ -121,7 +126,7 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
         if (!topics || topics.length === 0) {
             return `
             <section class="topic-section empty-analysis-section">
-                <div class="section-title">今日话题 Topics</div>
+                <div class="section-title">本期热门话题</div>
                 <div class="empty-state">本次未生成有效话题，请检查文本模型的并发与日志。</div>
             </section>
             `
@@ -161,7 +166,7 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
                 <svg class="doodle" viewBox="0 0 24 24">
                     <path d="M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z" />
                 </svg>
-                今日话题 Topics
+                本期热门话题
             </div>
             ${itemsHtml}
         </div>
@@ -169,7 +174,8 @@ export class ScrapbookSkinRenderer implements SkinRenderer {
     }
 
     formatTags(tags: string[]): string {
-        if (!tags || tags.length === 0) return ''
+        if (!tags || tags.length === 0)
+            return '<div class="empty-state">暂无记录</div>'
         const colors = ['c1', 'c2', 'c3', 'c4']
         return tags
             .map((tag, i) => {

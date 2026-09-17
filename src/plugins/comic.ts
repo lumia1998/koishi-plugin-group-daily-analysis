@@ -1,6 +1,10 @@
-import { Context, h, Session } from 'koishi'
+import { Context, h, Session, User } from 'koishi'
 import { Config, GroupListener } from '../config'
-import type { SummaryTopic } from '../types'
+import type { SummaryTopic, UserPersonaProfile } from '../types'
+import {
+    buildUserComicImagePrompt,
+    buildUserComicPrompt
+} from '../user-comic-prompts'
 import {
     calculateBasicStats,
     matchesGroupList,
@@ -20,7 +24,8 @@ import { createHash } from 'node:crypto'
 
 export const inject = [
     'chatluna_group_analysis_message',
-    'chatluna_group_analysis_llm'
+    'chatluna_group_analysis_llm',
+    'chatluna_group_analysis'
 ]
 
 declare module 'koishi' {
@@ -59,7 +64,8 @@ export function apply(ctx: Context, config: Config) {
             | 'send'
         >,
         topics?: SummaryTopic[],
-        days = 1
+        days = 1,
+        profile?: UserPersonaProfile
     ) => {
         if (!session || session.isDirect) return '请在群聊中使用群漫画。'
         if (!config.comic?.enabled) return '请先在插件配置中启用漫画功能。'
@@ -151,10 +157,14 @@ export function apply(ctx: Context, config: Config) {
                 bytes: references.reduce((sum, item) => sum + item.length, 0),
                 count: references.length
             })
-            stage = '获取当天消息'
-            await session.send('正在提取群话题并生成漫画，请稍候。')
+            stage = profile ? '读取已有画像' : '获取当天消息'
+            await session.send(
+                profile
+                    ? '正在将已有画像特点转化为漫画分镜，请稍候。'
+                    : '正在提取群话题并生成漫画，请稍候。'
+            )
             let resolvedTopics = topics
-            if (resolvedTopics === undefined) {
+            if (!profile && resolvedTopics === undefined) {
                 const messages =
                     await ctx.chatluna_group_analysis_message.getHistoricalMessages(
                         {
@@ -192,15 +202,27 @@ export function apply(ctx: Context, config: Config) {
                     )
             }
             if (controller.signal.aborted) return
-            if (!Array.isArray(resolvedTopics) || !resolvedTopics.length)
-                return '未提取到有效话题。'
-            trace('话题分析完成', { topics: resolvedTopics.length })
-            stage = '生成分镜'
-            const prompt = buildStoryboardPrompt(
-                comicConfig,
-                resolvedTopics,
-                references.length > 0
+            if (
+                !profile &&
+                (!Array.isArray(resolvedTopics) || !resolvedTopics.length)
             )
+                return '未提取到有效话题。'
+            trace('素材读取完成', {
+                topics: resolvedTopics?.length || 0,
+                persona: !!profile
+            })
+            stage = '生成分镜'
+            const prompt = profile
+                ? buildUserComicPrompt(
+                      comicConfig,
+                      profile,
+                      references.length > 0
+                  )
+                : buildStoryboardPrompt(
+                      comicConfig,
+                      resolvedTopics,
+                      references.length > 0
+                  )
             const storyboard =
                 await ctx.chatluna_group_analysis_llm.generateText(
                     prompt,
@@ -208,18 +230,29 @@ export function apply(ctx: Context, config: Config) {
                     controller.signal,
                     presetName
                 )
+            if (controller.signal.aborted) return
+            if (
+                profile &&
+                storyboard.trim() === '画像资料不足，无法生成三个有依据的分镜。'
+            )
+                return '画像资料不足，无法生成三个有依据的分镜。请先积累更多画像信息。'
             lastRun.set(key, Date.now())
             trace('分镜生成完成', { chars: storyboard.length })
             stage = '调用生图 API'
             const image = await imageLimiter.run(() =>
                 generateImage(
                     comicConfig,
-                    buildComicImagePrompt(
-                        storyboard,
-                        comicConfig,
-                        references.length > 0,
-                        resolvedTopics.length
-                    ),
+                    profile
+                        ? buildUserComicImagePrompt(
+                              storyboard,
+                              references.length > 0
+                          )
+                        : buildComicImagePrompt(
+                              storyboard,
+                              comicConfig,
+                              references.length > 0,
+                              resolvedTopics.length
+                          ),
                     references,
                     controller.signal,
                     trace
@@ -243,7 +276,7 @@ export function apply(ctx: Context, config: Config) {
             })
             if (!controller.signal.aborted)
                 return h.text(
-                    `群漫画失败（${stage}）：${detail}\n不会自动重复付费生图。`
+                    `${profile ? '用户画像漫画' : '群漫画'}失败（${stage}）：${detail}\n不会自动重复付费生图。`
                 )
         } finally {
             trace('任务结束', { stage, elapsedMs: Date.now() - started })
@@ -269,6 +302,52 @@ export function apply(ctx: Context, config: Config) {
                 days == null ? 1 : Math.max(1, Math.min(7, Number(days)))
             return run(session, undefined, count)
         })
+
+    ctx.command(
+        '用户画像.漫画 [user:user]',
+        '将已保存的长期用户画像生成三至四格漫画'
+    ).action(async ({ session }, user) => {
+        if (session.isDirect) return '请在群聊中使用此命令。'
+        if (
+            !shouldListenToMessage(
+                session,
+                config.listenerGroups,
+                config.enableAllGroupsByDefault
+            )
+        )
+            return '本群未启用群分析功能，请使用 群分析.启用 来启用本群的群分析功能。'
+        if (!config.comic.enabled || !config.comic.userEnabled)
+            return '请先在插件配置中启用漫画服务和用户画像漫画。'
+        let userId = user?.split(':').pop() || session.userId
+        if (
+            userId !== session.userId &&
+            ((session as Session<User.Field>).user?.authority ?? 0) < 3
+        ) {
+            await session.send(
+                '你没有权限查看其他用户的画像。当前需要的权限为 3 级。将转为查看自己的画像。'
+            )
+            userId = session.userId
+        }
+        if (!userId) return '无法获取目标用户信息。'
+        try {
+            const saved = await ctx.chatluna_group_analysis.getUserPersona(
+                session.platform,
+                session.selfId,
+                userId
+            )
+            if (!saved?.profile)
+                return '当前用户还没有用户画像，请先生成用户画像。'
+            return await run(session, undefined, 1, {
+                ...saved.profile,
+                userId,
+                username: saved.username || saved.profile.username
+            })
+        } catch (error) {
+            return h.text(
+                `读取用户画像失败：${errorDetail(error, [config.comic.apiKey, config.llm?.apiKey])}`
+            )
+        }
+    })
 
     ctx.on('group-daily-analysis/auto-comic', async (payload) => {
         const { group, topics } =

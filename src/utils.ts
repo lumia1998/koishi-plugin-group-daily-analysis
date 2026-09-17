@@ -12,6 +12,7 @@ import { Config, GroupListener, GroupListMode } from './config'
 import type { OneBotBot } from 'koishi-plugin-adapter-onebot'
 
 import { skinRegistry } from './skins'
+import { escapeHtml, safeImageUrl } from './skins/escape'
 
 export function calculateBasicStats(
     messages: StoredMessage[]
@@ -270,7 +271,26 @@ export function renderTemplate(
     template: string,
     data: Record<string, string>
 ): string {
-    return template.replace(/\$\{(.*?)\}/g, (_, key) => data[key] || '')
+    const htmlFields = new Set([
+        'userStats',
+        'topics',
+        'userTitles',
+        'activeHoursChart',
+        'goldenQuotes',
+        'chatQuality',
+        'keyTraits',
+        'interests',
+        'evidence'
+    ])
+    return template.replace(/\$\{(.*?)\}/g, (_, key) => {
+        const value = data[key] || ''
+        if (htmlFields.has(key)) return value
+        return escapeHtml(
+            key === 'avatar' || key === 'dynamicAvatarUrl'
+                ? safeImageUrl(value)
+                : value
+        )
+    })
 }
 
 export function shouldListenToMessage(

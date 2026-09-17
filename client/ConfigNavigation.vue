@@ -38,6 +38,7 @@ import {
     watch,
     type ComputedRef
 } from 'vue'
+import { clearConfigLabels, localizeConfigLabels } from './config-labels'
 
 const pluginName = inject<ComputedRef<string>>('plugin:name')
 const isOwn = computed(() =>
@@ -66,12 +67,14 @@ function cleanup() {
         if (element.id === id) element.removeAttribute('id')
     }
     assignedIds.clear()
+    clearConfigLabels(view)
     view = undefined
     sections.value = []
 }
 
 function collect() {
     if (!view) return
+    localizeConfigLabels(view)
     const headers = [
         ...view.querySelectorAll<HTMLElement>('.k-schema-header')
     ].filter(
@@ -147,6 +150,19 @@ watch(
 
 onBeforeUnmount(cleanup)
 </script>
+
+<style>
+.group-analysis-config-label {
+    font-size: 0 !important;
+}
+.group-analysis-config-label::after {
+    content: attr(data-config-label);
+    font-size: 14px;
+}
+.group-analysis-config-prefix {
+    display: none !important;
+}
+</style>
 
 <style scoped>
 .group-analysis-navigation {

@@ -15,6 +15,7 @@ import {
 } from '../utils'
 import { applySkinAliasStyles, skinRegistry, skinSourceMap } from '../skins'
 import { ConcurrencyLimiter } from './limiter'
+import { escapeHtml } from '../skins/escape'
 
 export class RendererService extends Service {
     static inject = ['puppeteer']
@@ -39,13 +40,17 @@ export class RendererService extends Service {
         })
     }
 
-    private getSkinPath(filename: string): string {
-        const skin = this.config.skin || 'md3'
-        return path.resolve(
-            this.templateDir,
-            skinSourceMap[skin] || skin,
-            filename
-        )
+    private async getSkinPath(filename: string): Promise<string> {
+        const skin = skinRegistry.getSafe(this.config.skin || 'md3').id
+        const candidates = [skin, skinSourceMap[skin], 'md3'].filter(Boolean)
+        for (const source of candidates) {
+            const candidate = path.resolve(this.templateDir, source, filename)
+            try {
+                await fs.access(candidate)
+                return candidate
+            } catch {}
+        }
+        throw new Error(`找不到报告模板：${filename}`)
     }
 
     private async imageToBase64(url: string): Promise<string> {
@@ -78,51 +83,69 @@ export class RendererService extends Service {
 
     async init() {
         const dirname =
-            __dirname?.length > 0 ? __dirname : fileURLToPath(import.meta.url)
-        const resourcesDir = dirname + '/../resources'
+            typeof __dirname === 'string'
+                ? __dirname
+                : path.dirname(fileURLToPath(import.meta.url))
+        let resourcesDir = path.resolve(dirname, '../resources')
+        try {
+            await fs.access(resourcesDir)
+        } catch {
+            // 源码测试运行位于 src/service，发布包位于 lib。
+            resourcesDir = path.resolve(dirname, '../../resources')
+        }
 
         const templateDir = this.templateDir
-        const skin = this.config.skin || 'md3'
 
-        // Source: resources/md3 (or other skin)
-        const skinSourceDir = path.resolve(
-            resourcesDir,
-            skinSourceMap[skin] || skin
-        )
-        // Destination: data/chatluna/group_analysis/md3
-        const skinDestDir = path.resolve(
-            templateDir,
-            skinSourceMap[skin] || skin
-        )
+        // 预备全部已注册主题，运行中切换时模板、组件和样式保持配对。
+        for (const skin of skinRegistry.getAllIds()) {
+            // Source: resources/md3 (or other skin)
+            const skinSourceDir = path.resolve(
+                resourcesDir,
+                skinSourceMap[skin] || skin
+            )
+            // Destination: data/chatluna/group_analysis/md3
+            const skinDestDir = path.resolve(templateDir, skin)
 
-        /* try {
+            /* try {
             await fs.access(skinDestDir)
         } catch (error) { */
-        await fs.mkdir(skinDestDir, { recursive: true })
+            await fs.mkdir(skinDestDir, { recursive: true })
 
-        // Copy only the configured skin directory
-        await fs.cp(skinSourceDir, skinDestDir, { recursive: true })
-        /*   } */
+            // Copy only the configured skin directory
+            await fs.cp(skinSourceDir, skinDestDir, { recursive: true })
+            if (skinSourceMap[skin]) {
+                const themeDir = path.resolve(resourcesDir, skin)
+                try {
+                    await fs.access(themeDir)
+                    await fs.cp(themeDir, skinDestDir, { recursive: true })
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+                        throw error
+                }
+            }
+            /*   } */
 
-        const tempHtmlFiles = await fs
-            .readdir(skinDestDir)
-            .then((files) =>
-                files.filter(
-                    (file) =>
-                        file.endsWith('.html') && !file.startsWith('template')
+            const tempHtmlFiles = await fs
+                .readdir(skinDestDir)
+                .then((files) =>
+                    files.filter(
+                        (file) =>
+                            file.endsWith('.html') &&
+                            !file.startsWith('template')
+                    )
                 )
-            )
-            .catch(() => [])
+                .catch(() => [])
 
-        for (const file of tempHtmlFiles) {
-            await fs.unlink(path.resolve(skinDestDir, file))
+            for (const file of tempHtmlFiles) {
+                await fs.unlink(path.resolve(skinDestDir, file))
+            }
         }
 
         const page = await this.ctx.puppeteer.page()
 
         try {
             await page.goto(
-                'file://' + this.getSkinPath('template_user.html'),
+                'file://' + (await this.getSkinPath('template_user.html')),
                 {
                     waitUntil: 'domcontentloaded'
                 }
@@ -233,12 +256,11 @@ export class RendererService extends Service {
             throw new Error('Puppeteer service is not available.')
         }
 
-        const templatePath = this.getSkinPath('template_group.html')
+        const templatePath = await this.getSkinPath('template_group.html')
         const randomId = Math.random().toString(36).substring(2, 15)
         const skin = this.config.skin || 'md3'
         const outTemplateHtmlPath = path.resolve(
-            this.templateDir,
-            skinSourceMap[skin] || skin,
+            path.dirname(templatePath),
             `${randomId}.html`
         )
 
@@ -333,7 +355,7 @@ export class RendererService extends Service {
                 theme = hour >= 19 || hour < 6 ? 'dark' : 'light'
             }
             const skin = config.skin || 'md3'
-            const templatePath = this.getSkinPath('template_group.html')
+            const templatePath = await this.getSkinPath('template_group.html')
             let templateHtml = await fs.readFile(templatePath, 'utf-8')
 
             // 将本地皮肤样式内联，使导出的 HTML 能独立打开。
@@ -469,12 +491,11 @@ export class RendererService extends Service {
             throw new Error('Puppeteer service is not available.')
         }
 
-        const templatePath = this.getSkinPath('template_user.html')
+        const templatePath = await this.getSkinPath('template_user.html')
         const randomId = Math.random().toString(36).substring(2, 15)
         const skin = this.config.skin || 'md3'
         const outTemplateHtmlPath = path.resolve(
-            this.templateDir,
-            skinSourceMap[skin] || skin,
+            path.dirname(templatePath),
             `${randomId}.html`
         )
 
@@ -488,7 +509,9 @@ export class RendererService extends Service {
             if (!tags || tags.length === 0) {
                 return '<div class="empty-state">暂无数据</div>'
             }
-            return tags.map((tag) => `<div class="chip">${tag}</div>`).join('')
+            return tags
+                .map((tag) => `<div class="chip">${escapeHtml(tag)}</div>`)
+                .join('')
         }
 
         const formatEvidence = (
@@ -504,7 +527,7 @@ export class RendererService extends Service {
 
             const cards = items
                 .map((item) => {
-                    const quoteHtml = (item || '')
+                    const quoteHtml = escapeHtml(item || '')
                         .split('\n')
                         .map((line) => line.trim())
                         .filter(Boolean)
@@ -534,6 +557,7 @@ export class RendererService extends Service {
         const filledHtml = renderTemplate(templateHtml, {
             avatar: dynamicAvatarBase64,
             username,
+            userId: data.userId,
             analysisDate: data.analysisDate || '暂无记录',
             summary: data.summary || '暂无摘要',
             keyTraits: formatTags(data.keyTraits),

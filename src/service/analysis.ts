@@ -942,7 +942,12 @@ export class AnalysisService extends Service {
                     messages,
                     selfId,
                     target,
-                    undefined,
+                    {
+                        timeRange: {
+                            start: new Date(checkpoint.startTime),
+                            end: new Date(checkpoint.endTime)
+                        }
+                    },
                     recovery?.payload.moduleResults,
                     { id: checkpointId, payload: checkpoint }
                 )
@@ -1702,7 +1707,10 @@ export class AnalysisService extends Service {
             chatQuality,
             activeHoursChart: activeHoursChartHtml,
             activeHoursData: overallActiveHours,
-            analysisDate: new Date().toLocaleDateString('zh-CN'),
+            analysisDate:
+                context?.timeRange?.start && context.timeRange.end
+                    ? `${context.timeRange.start.toLocaleString('zh-CN')} 至 ${context.timeRange.end.toLocaleString('zh-CN')}`
+                    : new Date().toLocaleDateString('zh-CN'),
             groupName
         }
 
