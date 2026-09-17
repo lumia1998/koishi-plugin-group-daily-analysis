@@ -453,30 +453,6 @@ export function isCacheExpiredByDays(
     return Date.now() - lastAnalysisAt.getTime() > ttlMs
 }
 
-export function isCacheExpiredByMinutes(
-    lastAnalysisAt: Date | undefined,
-    ttlMinutes: number
-): boolean {
-    if (ttlMinutes <= 0) return true
-    if (!lastAnalysisAt) return true
-    const ttlMs = ttlMinutes * 60 * 1000
-    return Date.now() - lastAnalysisAt.getTime() > ttlMs
-}
-
-export function buildGroupAnalysisCacheKey(
-    selfId: string,
-    target: { platform?: string; guildId?: string; channelId?: string },
-    days: number
-): string {
-    return JSON.stringify([
-        target.platform || '',
-        selfId,
-        target.guildId || '',
-        target.channelId || '',
-        days
-    ])
-}
-
 export function buildMessagePersistenceKey(message: StoredMessage): string {
     const scope = message.guildId || message.channelId || 'global'
     return `${message.platform}_${message.selfId}_${scope}`

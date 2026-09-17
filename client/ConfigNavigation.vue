@@ -24,29 +24,6 @@
             >
                 {{ section.title }}
             </a>
-            <div class="reference-links">
-                <a
-                    href="https://github.com/lumia1998/koishi-plugin-group-daily-analysis#截图"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                >
-                    参考图例 ↗
-                </a>
-                <a
-                    href="https://github.com/lumia1998/koishi-plugin-group-daily-analysis#使用"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                >
-                    使用说明 ↗
-                </a>
-                <a
-                    href="https://chatluna.chat/guide/preset-system/introduction.html"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                >
-                    ChatLuna 预设 ↗
-                </a>
-            </div>
         </div>
     </nav>
 </template>
@@ -216,11 +193,6 @@ onBeforeUnmount(cleanup)
 .navigation-links a:focus-visible,
 .navigation-toggle:focus-visible {
     outline: 2px solid var(--k-color-primary, #527ca6);
-}
-.reference-links {
-    border-top: 1px solid var(--k-color-divider, #dce0e5);
-    margin-top: 6px;
-    padding-top: 6px;
 }
 @media (max-width: 999px) {
     .group-analysis-navigation {

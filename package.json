@@ -1,7 +1,7 @@
 {
     "name": "koishi-plugin-group-daily-analysis",
-    "description": "一个分析QQ群聊历史并生成精美报告的Koishi插件",
-    "version": "0.0.1-alpha.8",
+    "description": "基于 ChatLuna 的 Koishi 群聊日报、用户画像与群漫画插件",
+    "version": "0.0.1-alpha.9",
     "type": "module",
     "main": "lib/index.cjs",
     "module": "lib/index.mjs",
@@ -102,7 +102,6 @@
     "scripts": {
         "test": "tsx --test tests/*.test.cts",
         "test:ui": "tsx tests/ui/verify.cts",
-        "test:reports": "tsx tests/ui/reports.cts",
         "build": "npx yakumo build",
         "bump": "npx yakumo version",
         "dep": "npx yakumo upgrade",

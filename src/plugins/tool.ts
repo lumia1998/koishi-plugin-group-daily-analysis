@@ -19,7 +19,6 @@ export const inject = {
 }
 
 export function apply(ctx: Context, config: Config) {
-    if (!config.registerTools) return
     const plugin = new ChatLunaPlugin(
         ctx,
         config as unknown as ChatLunaPlugin.Config,
@@ -28,10 +27,6 @@ export function apply(ctx: Context, config: Config) {
     )
 
     ctx.on('ready', () => {
-        if (!config.registerTools) {
-            return
-        }
-
         plugin.registerTool('group_message_fetch', {
             selector() {
                 return true
@@ -266,11 +261,6 @@ class GroupUserPersonaTool extends StructuredTool {
         }
 
         const userId = input.user_id
-
-        // Check if user is in personaUserFilter
-        if (this.config.personaUserFilter.includes(userId)) {
-            return `User ${userId} is in the persona filter list and cannot be analyzed.`
-        }
 
         try {
             const result =

@@ -1,13 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { errorDetail, errorKind, Trace } from '../diagnostics'
-export type TextProtocol =
-    | 'openai-responses'
-    | 'anthropic-messages'
-    | 'google-v1beta'
-    | 'openai-chat'
+export type TextFormat = 'openai' | 'google' | 'anthropic'
 
 export interface ApiConfig {
-    protocol: TextProtocol
+    format: TextFormat
     baseUrl: string
     apiKey: string
     model: string
@@ -164,8 +160,8 @@ export function textRequest(
         .map((m) => m.content)
         .join('\n\n')
     const turns = conversation.filter((m) => m.role !== 'system')
-    switch (config.protocol) {
-        case 'openai-responses':
+    switch (config.format) {
+        case 'openai':
             return {
                 url: endpoint(config.baseUrl, '/v1/responses'),
                 headers: {},
@@ -176,7 +172,7 @@ export function textRequest(
                     store: false
                 }
             }
-        case 'anthropic-messages':
+        case 'anthropic':
             return {
                 url: endpoint(config.baseUrl, '/v1/messages'),
                 headers: {
@@ -190,7 +186,7 @@ export function textRequest(
                     messages: turns
                 }
             }
-        case 'google-v1beta':
+        case 'google':
             return {
                 url: endpoint(
                     config.baseUrl,
@@ -211,26 +207,15 @@ export function textRequest(
                     }
                 }
             }
-        case 'openai-chat':
-            return {
-                url: endpoint(config.baseUrl, '/v1/chat/completions'),
-                headers: {},
-                body: {
-                    ...common,
-                    messages: conversation,
-                    max_tokens: config.maxOutputTokens,
-                    temperature
-                }
-            }
         default:
-            throw new Error('不支持的 LLM 协议。')
+            throw new Error('不支持的 LLM 格式。')
     }
 }
 
-export function extractText(protocol: TextProtocol, data: any): string {
+export function extractText(format: TextFormat, data: any): string {
     let text: string
-    switch (protocol) {
-        case 'openai-responses':
+    switch (format) {
+        case 'openai':
             if (data.status === 'incomplete' || data.status === 'failed')
                 throw new Error('模型输出未完成。请检查输出长度限制。')
             text = (data.output ?? [])
@@ -240,7 +225,7 @@ export function extractText(protocol: TextProtocol, data: any): string {
                 .map((x: any) => x.text)
                 .join('\n')
             break
-        case 'anthropic-messages':
+        case 'anthropic':
             if (data.stop_reason === 'max_tokens')
                 throw new Error('模型输出达到长度限制。')
             text = (data.content ?? [])
@@ -248,7 +233,7 @@ export function extractText(protocol: TextProtocol, data: any): string {
                 .map((x: any) => x.text)
                 .join('\n')
             break
-        case 'google-v1beta':
+        case 'google':
             if (
                 data.candidates?.[0]?.finishReason &&
                 data.candidates[0].finishReason !== 'STOP'
@@ -258,11 +243,6 @@ export function extractText(protocol: TextProtocol, data: any): string {
                 .filter((x: any) => !x.thought && typeof x.text === 'string')
                 .map((x: any) => x.text)
                 .join('\n')
-            break
-        case 'openai-chat':
-            if (data.choices?.[0]?.finish_reason === 'length')
-                throw new Error('模型输出达到长度限制。')
-            text = data.choices?.[0]?.message?.content
             break
     }
     if (typeof text !== 'string' || !text.trim())

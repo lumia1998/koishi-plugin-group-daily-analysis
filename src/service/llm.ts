@@ -62,7 +62,7 @@ export class LLMService extends Service {
         )
         const trace = createTrace(this.ctx, !!this.config.debug, '文本 API')
         trace('开始生成', {
-            protocol: api.protocol,
+            format: api.format,
             model,
             inputChars: prompt.length
         })
@@ -120,7 +120,7 @@ export class LLMService extends Service {
                         scoped.completionTokens += completionTokens
                         scoped.totalTokens += totalTokens
                     }
-                    text = extractText(api.protocol, response)
+                    text = extractText(api.format, response)
                     return
                 } catch (error) {
                     lastError = error

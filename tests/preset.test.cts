@@ -7,7 +7,7 @@ import {
 } from '@langchain/core/messages'
 import { Config } from '../src/config'
 import { presetMessages, comicPreset } from '../src/service/preset'
-import { textRequest, type TextProtocol } from '../src/service/api'
+import { textRequest, type TextFormat } from '../src/service/api'
 import { LLMService } from '../src/service/llm'
 
 function fixture() {
@@ -85,17 +85,12 @@ test('disabled and empty presets retain a usable task; unsupported content is ex
     await assert.rejects(presetMessages(ctx, 'narrator', 'task'), /不支持/)
 })
 
-test('all four protocols preserve system persona, example roles and final task', async () => {
+test('all text formats preserve system persona, example roles and final task', async () => {
     const { ctx } = fixture()
     const messages = await presetMessages(ctx, 'narrator', 'task')
-    for (const protocol of [
-        'openai-responses',
-        'openai-chat',
-        'anthropic-messages',
-        'google-v1beta'
-    ] as TextProtocol[]) {
+    for (const format of ['openai', 'anthropic', 'google'] as TextFormat[]) {
         const config = Config({
-            llm: { protocol, baseUrl: 'https://example.com', model: 'text' }
+            llm: { format, baseUrl: 'https://example.com', model: 'text' }
         })
         const body: any = textRequest(
             config.llm,
@@ -104,11 +99,9 @@ test('all four protocols preserve system persona, example roles and final task',
             1,
             messages
         ).body
-        if (protocol === 'openai-responses')
+        if (format === 'openai')
             assert.deepEqual(body.input, messages)
-        else if (protocol === 'openai-chat')
-            assert.deepEqual(body.messages, messages)
-        else if (protocol === 'anthropic-messages') {
+        else if (format === 'anthropic') {
             assert.match(body.system, /温柔的讲解员/)
             assert.deepEqual(
                 body.messages.map((m: any) => m.role),

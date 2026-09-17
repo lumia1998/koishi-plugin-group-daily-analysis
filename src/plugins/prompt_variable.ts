@@ -107,14 +107,6 @@ export async function apply(ctx: Context, config: Config) {
                         return ''
                     }
 
-                    // Check if user is in personaUserFilter
-                    if (config.personaUserFilter?.includes(userId)) {
-                        logger.debug(
-                            `User ${userId} is in persona filter list, skipping`
-                        )
-                        return ''
-                    }
-
                     const result =
                         await ctx.chatluna_group_analysis.getUserPersona(
                             session.platform,

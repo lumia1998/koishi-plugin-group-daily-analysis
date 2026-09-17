@@ -87,14 +87,12 @@ const json = (data: unknown) =>
 
 test('schema supplies nested API and disabled-comic defaults', () => {
     const config = Config({})
-    assert.equal(config.llm.protocol, 'openai-responses')
+    assert.equal(config.llm.format, 'openai')
     assert.equal(config.llm.timeout, 120)
     assert.equal(config.comic.enabled, false)
     assert.equal(config.comic.maxTopics, undefined)
     assert.equal(config.debug, false)
-    assert.equal(config.chatQualityAnalysis, true)
     assert.deepEqual(config.cronOutputFormats, [])
-    assert.equal(config.incrementalEnabled, false)
 })
 
 test('detailed logging is opt-in and API traces omit secrets and bodies', async (t) => {
@@ -153,13 +151,13 @@ test('endpoint accepts root, version and full paths without duplicating versions
     assert.throws(() => endpoint('https://user:secret@host', '/v1/responses'))
 })
 
-test('all text protocols send and extract their native wire formats', async (t) => {
+test('all text formats send and extract their native wire formats', async (t) => {
     const config = Config({}).llm
     config.baseUrl = base
     config.apiKey = 'test-key'
     const cases = [
         [
-            'openai-responses',
+            'openai',
             '/v1/responses',
             {
                 output: [
@@ -171,7 +169,7 @@ test('all text protocols send and extract their native wire formats', async (t) 
             }
         ],
         [
-            'anthropic-messages',
+            'anthropic',
             '/v1/messages',
             {
                 content: [
@@ -181,7 +179,7 @@ test('all text protocols send and extract their native wire formats', async (t) 
             }
         ],
         [
-            'google-v1beta',
+            'google',
             '/v1beta/models/model:generateContent',
             {
                 candidates: [
@@ -197,44 +195,34 @@ test('all text protocols send and extract their native wire formats', async (t) 
                 ]
             }
         ],
-        [
-            'openai-chat',
-            '/v1/chat/completions',
-            {
-                choices: [
-                    { finish_reason: 'stop', message: { content: 'hello' } }
-                ]
-            }
-        ]
     ] as const
-    for (const [protocol, path, response] of cases) {
-        config.protocol = protocol
+    for (const [format, path, response] of cases) {
+        config.format = format
         const request = textRequest(config, 'model', 'prompt', 1)
         assert.equal(request.url, base + path)
         t.mock.method(globalThis, 'fetch', async (_url, init) => {
             const headers = new Headers(init?.headers)
             if (
-                protocol === 'anthropic-messages' ||
-                protocol === 'google-v1beta'
+                format === 'anthropic' || format === 'google'
             )
                 assert.equal(headers.has('Authorization'), false)
             else assert.equal(headers.get('Authorization'), 'Bearer test-key')
             const body = JSON.parse(init!.body as string)
-            if (protocol === 'openai-responses') {
+            if (format === 'openai') {
                 assert.equal(body.input, 'prompt')
                 assert.equal(body.store, false)
             }
-            if (protocol === 'anthropic-messages') {
+            if (format === 'anthropic') {
                 assert.equal(body.max_tokens, 32768)
                 assert.equal(headers.get('x-api-key'), 'test-key')
             }
-            if (protocol === 'google-v1beta')
+            if (format === 'google')
                 assert.equal(body.contents[0].parts[0].text, 'prompt')
             return json(response)
         })
         assert.equal(
             extractText(
-                protocol,
+                format,
                 await requestJson(
                     request.url,
                     config.apiKey,
@@ -251,21 +239,18 @@ test('all text protocols send and extract their native wire formats', async (t) 
 
 test('refused, truncated, failed, malformed and canceled responses fail safely', async (t) => {
     assert.throws(() =>
-        extractText('openai-responses', { status: 'incomplete' })
+        extractText('openai', { status: 'incomplete' })
     )
     assert.throws(() =>
-        extractText('anthropic-messages', { stop_reason: 'max_tokens' })
+        extractText('anthropic', { stop_reason: 'max_tokens' })
     )
     assert.throws(() =>
-        extractText('google-v1beta', {
+        extractText('google', {
             candidates: [{ finishReason: 'SAFETY' }]
         })
     )
     assert.throws(() =>
-        extractText('openai-chat', { choices: [{ finish_reason: 'length' }] })
-    )
-    assert.throws(() =>
-        extractText('openai-responses', {
+        extractText('openai', {
             output: [{ type: 'message', content: [{ type: 'refusal' }] }]
         })
     )
@@ -310,7 +295,7 @@ test('Google reference is inlineData; OpenAI reference is multipart edits', asyn
         model: 'image-model'
     })
     t.mock.method(globalThis, 'fetch', async (url, init) => {
-        if (config.protocol === 'google-v1beta') {
+        if (config.format === 'google') {
             const body = JSON.parse(init!.body as string)
             assert.equal(
                 body.contents[0].parts[1].inlineData.data,
@@ -339,7 +324,7 @@ test('Google reference is inlineData; OpenAI reference is multipart edits', asyn
         return json({ data: [{ b64_json: png.toString('base64') }] })
     })
     assert.deepEqual(await generateImage(config, 'storyboard', png), png)
-    config.protocol = 'openai-images'
+    config.format = 'openai'
     assert.deepEqual(await generateImage(config, 'storyboard', png), png)
     t.mock.restoreAll()
     t.mock.method(globalThis, 'fetch', async (url, init) => {
@@ -588,7 +573,7 @@ test('model discovery handles authentication, full endpoints and pagination', as
     })
     assert.deepEqual(await listModels(config), ['a', 'b'])
     t.mock.restoreAll()
-    config.protocol = 'google-v1beta'
+    config.format = 'google'
     config.baseUrl = base + '/v1beta/models/old:generateContent'
     t.mock.method(globalThis, 'fetch', async (url, init) => {
         assert.equal(

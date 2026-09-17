@@ -4,7 +4,7 @@ import { endpoint, readJson } from './service/api'
 import { createTrace, errorKind, Trace } from './diagnostics'
 
 type ModelApi =
-    | Pick<Config['comic'], 'protocol' | 'baseUrl' | 'apiKey' | 'timeout'>
+    | Pick<Config['comic'], 'format' | 'baseUrl' | 'apiKey' | 'timeout'>
     | Config['llm']
 
 export async function listModels(
@@ -12,13 +12,13 @@ export async function listModels(
     signal?: AbortSignal,
     trace?: Trace
 ): Promise<string[]> {
-    const google = config.protocol === 'google-v1beta'
+    const google = config.format === 'google'
     const url = new URL(
         endpoint(config.baseUrl, google ? '/v1beta/models' : '/v1/models')
     )
     const headers: Record<string, string> = google
         ? { 'x-goog-api-key': config.apiKey }
-        : config.protocol === 'anthropic-messages'
+        : config.format === 'anthropic'
           ? { 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' }
           : config.apiKey
             ? { Authorization: `Bearer ${config.apiKey}` }
@@ -75,7 +75,7 @@ export function registerModelLists(ctx: Context, config: Config) {
         if (!api.baseUrl?.trim()) return
         try {
             const started = Date.now()
-            trace('获取开始', { protocol: api.protocol })
+            trace('获取开始', { format: api.format })
             const ids = await listModels(api, controller.signal, trace)
             trace('获取完成', {
                 count: ids.length,

@@ -7,7 +7,7 @@ import { skinRegistry } from '../src/skins'
 
 const endpoint = 'https://provider.example'
 
-test('chat quality review validates dimensions and appears in text/html formatters', async (t) => {
+test('chat quality review validates dimensions and appears in report formatters', async (t) => {
     const config = Config({})
     config.llm.baseUrl = endpoint
     config.llm.model = 'text-model'

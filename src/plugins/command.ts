@@ -42,7 +42,6 @@ export function apply(ctx: Context, config: Config) {
         )
         .alias('group-analysis')
 
-        .option('force', '-f 是否强制刷新群分析')
         .option('group', '-g <guildId:string> 指定群号', {
             authority: 3
         })
@@ -98,9 +97,7 @@ export function apply(ctx: Context, config: Config) {
                             channelId: targetChannelId || undefined,
                             platform: session.platform
                         },
-                        analysisDays,
-                        undefined,
-                        options.force ?? false
+                        analysisDays
                     )
                 }
             } catch (err) {
@@ -144,7 +141,7 @@ export function apply(ctx: Context, config: Config) {
         { authority: 2 }
     )
         .alias('group-analysis.redraw')
-        .option('format', '-f <format:string> 输出 image/pdf/text/html')
+        .option('format', '-f <format:string> 输出 image/pdf/text')
         .action(async ({ session, options }, reportId) => {
             if (session.isDirect) return '请在目标群聊中重绘历史报告。'
             if (!checkGroup(session)) return '本群未启用分析功能。'
@@ -167,25 +164,15 @@ export function apply(ctx: Context, config: Config) {
             } catch {
                 return '历史报告数据损坏。'
             }
-            const format =
-                (options as any)?.format ||
-                (row.format === 'incremental' ? 'text' : row.format) ||
-                config.outputFormat
+            const storedFormat = ['image', 'pdf', 'text'].includes(row.format)
+                ? row.format
+                : config.outputFormat
+            const format = (options as any)?.format || storedFormat
             if (
                 (options as any)?.format &&
-                !['image', 'pdf', 'text', 'html'].includes(format)
+                !['image', 'pdf', 'text'].includes(format)
             )
-                return '输出格式必须是 image、pdf、text 或 html。'
-            if (format === 'html') {
-                const file =
-                    await ctx.chatluna_group_analysis_renderer.renderGroupAnalysisHtml(
-                        result,
-                        config
-                    )
-                return config.htmlBaseUrl
-                    ? `${config.htmlBaseUrl.replace(/\/$/, '')}/${file.split(/[\\/]/).pop()}`
-                    : `HTML 报告已保存：${file}`
-            }
+                return '输出格式必须是 image、pdf 或 text。'
             if (format === 'pdf') {
                 const pdf =
                     await ctx.chatluna_group_analysis_renderer.renderGroupAnalysisToPdf(
@@ -377,10 +364,6 @@ export function apply(ctx: Context, config: Config) {
 
             if (!userId) {
                 return '无法获取目标用户信息。'
-            }
-
-            if (config.personaUserFilter.includes(userId)) {
-                return '该用户已被设置为禁止分析用户画像。'
             }
 
             try {

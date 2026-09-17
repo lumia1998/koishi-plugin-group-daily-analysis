@@ -16,15 +16,7 @@ import type {} from '@koishijs/plugin-console'
 export const usage = `
 ## 配置指南
 
-右侧“配置目录”可跳转到各设置分组；小屏幕可展开目录。
-
-- [参考图例](https://github.com/lumia1998/koishi-plugin-group-daily-analysis#截图)
-- [使用说明](https://github.com/lumia1998/koishi-plugin-group-daily-analysis#使用)
-- [ChatLuna 预设说明](https://chatluna.chat/guide/preset-system/introduction.html)
-
-在 ChatLuna 导入预设后，从“ChatLuna 预设”分组选择。漫画可继承日报预设，也可单独选择；模型仍由本插件的自定义 API 设置决定。
-
-报告支持聊天质量锐评、HTML 保存与外链；“群分析.历史”查看历史任务，“群分析.重绘”可在不消耗 Token 的情况下换格式重绘，“群分析.主题”可预览/切换皮肤。
+配置页仅保留实际会影响群聊日报的设置。报告默认输出为图片；“群分析.历史”可查看历史任务，“群分析.重绘”可在不消耗 Token 的情况下以图片、PDF 或文本重新渲染。
 `
 
 export * from './config'

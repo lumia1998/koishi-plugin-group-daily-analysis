@@ -148,7 +148,7 @@ export async function generateImage(
     const timer = setTimeout(abort, config.timeout * 1000)
     const started = Date.now()
     trace?.('生图请求开始', {
-        protocol: config.protocol,
+        format: config.format,
         model: config.model,
         referenceBytes: Array.isArray(reference)
             ? reference.reduce((sum, item) => sum + item.length, 0)
@@ -163,7 +163,7 @@ export async function generateImage(
                 ? reference
                 : [reference]
             : []
-        if (config.protocol === 'google-v1beta') {
+        if (config.format === 'google') {
             const parts: any[] = [{ text: prompt }]
             for (const item of references)
                 parts.push({
@@ -196,7 +196,7 @@ export async function generateImage(
             item = {
                 b64_json: image?.inlineData?.data ?? image?.inline_data?.data
             }
-        } else if (config.protocol === 'openai-images') {
+        } else if (config.format === 'openai') {
             if (references.length) {
                 const url = endpoint(
                     config.baseUrl.replace(
@@ -242,7 +242,7 @@ export async function generateImage(
                 )
                 item = data.data?.[0]
             }
-        } else throw new Error('不支持的生图协议。')
+        } else throw new Error('不支持的生图格式。')
         trace?.('读取图片', {
             source: typeof item?.b64_json === 'string' ? 'base64' : 'url'
         })

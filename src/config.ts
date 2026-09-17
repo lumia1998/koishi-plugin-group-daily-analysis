@@ -34,7 +34,7 @@ export interface Config {
         autoSend: boolean
         groupMode: GroupListMode
         groups: string[]
-        protocol: 'openai-images' | 'google-v1beta'
+        format: 'openai' | 'google'
         baseUrl: string
         apiKey: string
         model: string
@@ -54,9 +54,6 @@ export interface Config {
     listenerGroups: GroupListener[]
     autoAnalysisGroupMode: GroupListMode
     autoAnalysisGroups: string[]
-    wordsFilter: string[]
-    userFilter: string[]
-    personaUserFilter: string[]
     alwaysPersistMessages: boolean
     retentionDays: number
     promptTopic: string
@@ -65,10 +62,8 @@ export interface Config {
     promptUserPersona: string
     promptQueryParser: string
     promptQueryChat: string
-    outputFormat: 'image' | 'pdf' | 'text' | 'html'
-    cronOutputFormats: ('image' | 'pdf' | 'text' | 'html')[]
-    htmlOutputDir: string
-    htmlBaseUrl: string
+    outputFormat: 'image' | 'pdf' | 'text'
+    cronOutputFormats: ('image' | 'pdf' | 'text')[]
     uploadGroupFile: boolean
     uploadGroupAlbum: boolean
     maxMessages: number
@@ -78,21 +73,11 @@ export interface Config {
     maxUserTitles: number
     maxGoldenQuotes: number
     maxUsersInReport: number
-    userTitleAnalysis: boolean
-    topicAnalysis: boolean
-    goldenQuoteAnalysis: boolean
-    chatQualityAnalysis: boolean
     promptChatQuality: string
-    incrementalEnabled: boolean
-    incrementalBatchSize: number
-    incrementalWindowHours: number
-    incrementalFallbackFull: boolean
-    incrementalImmediateReport: boolean
     maxConcurrentTasks: number
     maxConcurrentLLM: number
     maxConcurrentRender: number
     checkpointEnabled: boolean
-    groupAnalysisCacheMinutes: number
     cronSchedule: string
     autoAnalysisCooldown: number
     cronAnalysisDays: number
@@ -102,7 +87,6 @@ export interface Config {
     personaLookbackDays: number
     personaMaxMessages: number
     personaMinMessages: number
-    registerTools: boolean
     theme: 'light' | 'dark' | 'auto'
     skin: string
 
@@ -156,10 +140,7 @@ export const Config: Schema<Config> = Schema.intersect([
             .default(true)
             .description(
                 '按自然日计算默认分析时间窗。开启时，1 天从当天 00:00 开始；关闭时，1 天表示从当前时间向前推 24 小时。'
-            ),
-        registerTools: Schema.boolean()
-            .default(true)
-            .description('是否注册用户画像和群聊分析工具到 ChatLuna。')
+            )
     }).description('基础设置'),
     Schema.object({
         alwaysPersistMessages: Schema.boolean()
@@ -187,35 +168,6 @@ export const Config: Schema<Config> = Schema.intersect([
         maxUsersInReport: Schema.number()
             .description('报告中显示的最大活跃用户数量。')
             .default(10),
-        userTitleAnalysis: Schema.boolean()
-            .description('是否启用用户称号分析（需要消耗更多 Token）。')
-            .default(true),
-        topicAnalysis: Schema.boolean()
-            .default(true)
-            .description('是否启用热门话题模块。'),
-        goldenQuoteAnalysis: Schema.boolean()
-            .default(true)
-            .description('是否启用金句模块。'),
-        chatQualityAnalysis: Schema.boolean()
-            .default(true)
-            .description(
-                '是否启用聊天质量锐评（主题、维度占比、点评与总评）。'
-            ),
-        incrementalEnabled: Schema.boolean()
-            .default(false)
-            .description(
-                '按消息数触发增量批次分析；关闭时保持原有定时全量分析。'
-            ),
-        incrementalBatchSize: Schema.number().min(1).max(1000).default(100),
-        incrementalWindowHours: Schema.number().min(1).max(168).default(24),
-        incrementalFallbackFull: Schema.boolean()
-            .default(true)
-            .description(
-                '增量分析失败或超过消息上限时，尝试当前窗口的全量分析；仍受 maxMessages 限制。消息总数不足时保留待处理计数。'
-            ),
-        incrementalImmediateReport: Schema.boolean()
-            .default(false)
-            .description('增量批次完成后立即发送一次报告。'),
         maxConcurrentTasks: Schema.number().min(1).max(32).default(3),
         maxConcurrentLLM: Schema.number().min(1).max(32).default(4),
         maxConcurrentRender: Schema.number().min(1).max(16).default(2),
@@ -224,18 +176,6 @@ export const Config: Schema<Config> = Schema.intersect([
             .description(
                 '保存固定时间范围和分析结果；重启后恢复未结束任务。已有结果直接重绘发送，未完成分析则重跑文本分析；不会重试付费漫画。'
             ),
-        groupAnalysisCacheMinutes: Schema.number()
-            .description('群分析缓存结果的保留分钟数。超过此时长后会重新分析。')
-            .min(0)
-            .default(5),
-        wordsFilter: Schema.array(String)
-            .role('table')
-            .description('过滤词列表。消息内含有此词语时将不会记入统计消息。')
-            .default([]),
-        userFilter: Schema.array(String)
-            .role('table')
-            .description('用户过滤列表。在群分析中忽略这些用户 ID 的消息。')
-            .default([]),
         maxTopics: Schema.number()
             .description('最多生成的话题数量。')
             .default(5),
@@ -250,8 +190,7 @@ export const Config: Schema<Config> = Schema.intersect([
         outputFormat: Schema.union([
             Schema.const('image').description('图片'),
             Schema.const('pdf').description('PDF'),
-            Schema.const('text').description('文本'),
-            Schema.const('html').description('HTML 文件')
+            Schema.const('text').description('文本')
         ])
             .description('默认输出格式。')
             .default('image'),
@@ -259,19 +198,12 @@ export const Config: Schema<Config> = Schema.intersect([
             Schema.union([
                 Schema.const('image'),
                 Schema.const('pdf'),
-                Schema.const('text'),
-                Schema.const('html')
+                Schema.const('text')
             ])
         )
             .role('table')
             .default([])
             .description('定时分析输出格式；留空时使用默认输出格式。'),
-        htmlOutputDir: Schema.string()
-            .default('data/chatluna/group_analysis/reports')
-            .description('HTML 报告保存目录（相对于 Koishi 工作目录）。'),
-        htmlBaseUrl: Schema.string()
-            .default('')
-            .description('HTML 报告外链前缀；留空时发送本地文件路径。'),
         uploadGroupFile: Schema.boolean()
             .default(false)
             .description('在 OneBot 支持时尝试把报告归档到群文件。'),
@@ -324,14 +256,11 @@ export const Config: Schema<Config> = Schema.intersect([
     }).description('LLM 设置'),
     Schema.object({
         llm: Schema.object({
-            protocol: Schema.union([
-                'openai-responses',
-                'anthropic-messages',
-                'google-v1beta',
-                'openai-chat'
-            ]).default('openai-responses'),
+            format: Schema.union(['openai', 'google', 'anthropic']).default(
+                'openai'
+            ),
             baseUrl: Schema.string().description(
-                '推荐填写带版本的基础地址，例如 http://10.1.2.30:8317/v1；Google 使用 /v1beta。也支持完整接口地址：Responses 为 /v1/responses，Chat 为 /v1/chat/completions，Anthropic 为 /v1/messages。保存地址和密钥后自动获取模型列表。'
+                '服务商 API 基础地址；OpenAI 使用 Responses API，Google 使用 Gemini，Anthropic 使用 Messages API。支持填写带版本的基础地址或完整接口地址。保存地址和密钥后自动获取模型列表。'
             ),
             apiKey: Schema.string().role('secret').default(''),
             model: Schema.dynamic('group-daily-analysis.text-model')
@@ -391,11 +320,9 @@ export const Config: Schema<Config> = Schema.intersect([
                 .role('table')
                 .default([])
                 .description('漫画群组 ID 列表。'),
-            protocol: Schema.union(['openai-images', 'google-v1beta']).default(
-                'google-v1beta'
-            ),
+            format: Schema.union(['openai', 'google']).default('google'),
             baseUrl: Schema.string().description(
-                '推荐填写 http://10.1.2.30:8317/v1，Google 使用 /v1beta。也可填完整地址，如 http://10.1.2.30:8317/v1/images/edits；OpenAI 有参考图时自动使用 images/edits，无参考图时使用 images/generations。保存地址和密钥后自动获取模型列表。'
+                '服务商 API 基础地址。OpenAI 有参考图时自动使用 images/edits，无参考图时使用 images/generations；Google 使用 Gemini 图片生成接口。支持填写带版本的基础地址或完整接口地址。保存地址和密钥后自动获取模型列表。'
             ),
             apiKey: Schema.string().role('secret').default(''),
             model: Schema.dynamic('group-daily-analysis.image-model')
@@ -463,12 +390,6 @@ export const Config: Schema<Config> = Schema.intersect([
         })
     }).description('自定义 API 与漫画'),
     Schema.object({
-        personaUserFilter: Schema.array(String)
-            .role('table')
-            .description(
-                '用户画像过滤列表。这些用户 ID 将无法分析用户画像（包括自动分析和手动命令调用）。'
-            )
-            .default([]),
         personaAnalysisMessageInterval: Schema.number()
             .description(
                 '跨群用户画像分析的触发阈值，新消息累计达到该条数时尝试更新画像。设置为 0 则关闭自动画像分析。'

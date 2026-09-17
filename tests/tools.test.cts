@@ -4,7 +4,7 @@ import { ref } from '@vue/reactivity'
 import { apply } from '../src/plugins/tool'
 import { Config } from '../src/config'
 
-async function setup(enabled = true) {
+async function setup() {
     const events: Record<string, Function[]> = {}
     const disposers: Function[] = []
     const registry = new Map<string, any>()
@@ -64,10 +64,7 @@ async function setup(enabled = true) {
             }
         }
     }
-    apply(
-        ctx,
-        Config({ registerTools: enabled, personaUserFilter: ['blocked'] })
-    )
+    apply(ctx, Config({}))
     for (const cb of events.ready || []) await cb()
     return {
         registry,
@@ -132,10 +129,6 @@ test('real ChatLuna registration supports both tool invoke schemas and disposal'
             '画像内容'
         )
         assert.deepEqual(fixture.personaCalls, [['onebot', 'bot', 'u']])
-        assert.match(
-            await persona.invoke({ user_id: 'blocked' }, options),
-            /filter list/
-        )
         assert.equal(fixture.personaCalls.length, 1)
         assert.match(
             await persona.invoke({ user_id: 'u' }, {}),
@@ -146,11 +139,4 @@ test('real ChatLuna registration supports both tool invoke schemas and disposal'
     }
     assert.equal(fixture.registry.size, 0)
     assert.equal(fixture.installed(), 0)
-})
-
-test('disabled tools do not install or register a ChatLuna plugin', async () => {
-    const fixture = await setup(false)
-    assert.equal(fixture.registry.size, 0)
-    assert.equal(fixture.installed(), 0)
-    await fixture.dispose()
 })
