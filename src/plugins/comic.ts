@@ -4,17 +4,18 @@ import type { SummaryTopic, UserPersonaProfile } from '../types'
 import {
     buildUserComicImagePrompt,
     buildUserComicPrompt,
-    formatUserComicStoryboard
+    formatUserComicStoryboard,
+    getUserComicImageOptions
 } from '../user-comic-prompts'
 import {
     calculateBasicStats,
+    getAvatarUrl,
     matchesGroupList,
     shouldListenToMessage
 } from '../utils'
 import {
     generateImage,
     imageMime,
-    loadQQAvatar,
     loadReference,
     loadReferences
 } from '../service/image'
@@ -31,7 +32,8 @@ import { createHash } from 'node:crypto'
 export const inject = [
     'chatluna_group_analysis_message',
     'chatluna_group_analysis_llm',
-    'chatluna_group_analysis'
+    'chatluna_group_analysis',
+    'chatluna_group_analysis_renderer'
 ]
 
 declare module 'koishi' {
@@ -95,6 +97,16 @@ export function apply(ctx: Context, config: Config) {
             return '本群未开放群漫画功能。'
         if (!config.comic.baseUrl || !config.comic.model)
             return '请配置生图 API 地址和模型。'
+        if (profile) {
+            const dimensions = [
+                Boolean(profile.summary?.trim()),
+                Boolean(profile.keyTraits?.some((item) => item?.trim())),
+                Boolean(profile.interests?.some((item) => item?.trim())),
+                Boolean(profile.communicationStyle?.trim())
+            ].filter(Boolean).length
+            if (dimensions < 3)
+                return '画像资料不足，无法生成四维观察报告。请先积累更多画像信息。'
+        }
         const enabledCharacters = (config.comic.characters || []).filter(
             (item) => item.enabled
         )
@@ -159,25 +171,32 @@ export function apply(ctx: Context, config: Config) {
             const characterReferences = primaryReference
                 ? [primaryReference, ...extraReferences]
                 : extraReferences
-            const avatarReference =
-                profile && session.platform === 'onebot'
-                    ? await loadQQAvatar(
-                          profile.userId,
-                          controller.signal
-                      ).catch((error) => {
-                          trace('用户头像读取失败', {
-                              reason: errorKind(error)
-                          })
-                          return undefined
-                      })
-                    : undefined
-            const references = avatarReference
-                ? [avatarReference, ...characterReferences]
+            let reportReference: Buffer | undefined
+            if (profile) {
+                stage = '渲染画像参考图'
+                const report =
+                    await ctx.chatluna_group_analysis_renderer.renderUserPersona(
+                        profile,
+                        profile.username || profile.userId,
+                        session.platform === 'onebot'
+                            ? getAvatarUrl(profile.userId)
+                            : '',
+                        config
+                    )
+                if (Buffer.isBuffer(report)) reportReference = report
+                else
+                    trace('画像参考图渲染失败，继续使用结构化画像', {
+                        report
+                    })
+            }
+            const references = reportReference
+                ? [reportReference, ...characterReferences]
                 : characterReferences
             trace('参考图读取完成', {
                 bytes: references.reduce((sum, item) => sum + item.length, 0),
                 count: references.length,
-                avatar: !!avatarReference
+                hasReportReference: !!reportReference,
+                characterReferences: characterReferences.length
             })
             stage = profile ? '读取已有画像' : '获取当天消息'
             await session.send(
@@ -238,8 +257,9 @@ export function apply(ctx: Context, config: Config) {
                 ? buildUserComicPrompt(
                       comicConfig,
                       profile,
-                      !!avatarReference,
-                      characterReferences.length > 0
+                      !!reportReference,
+                      characterReferences.length > 0,
+                      config.skin
                   )
                 : buildStoryboardPrompt(
                       comicConfig,
@@ -274,8 +294,9 @@ export function apply(ctx: Context, config: Config) {
                     profile
                         ? buildUserComicImagePrompt(
                               storyboard,
-                              !!avatarReference,
-                              characterReferences.length > 0
+                              !!reportReference,
+                              characterReferences.length > 0,
+                              config.skin
                           )
                         : buildComicImagePrompt(
                               storyboard,
@@ -285,7 +306,8 @@ export function apply(ctx: Context, config: Config) {
                           ),
                     references,
                     controller.signal,
-                    trace
+                    trace,
+                    profile ? getUserComicImageOptions(config.skin) : undefined
                 )
             )
             stage = '发送漫画'
@@ -355,7 +377,7 @@ export function apply(ctx: Context, config: Config) {
 
     const userComicCommand = ctx.command(
         '用户画像.漫画 [user:user]',
-        '将已保存的长期用户画像生成三至四格漫画'
+        '将已保存的长期用户画像生成四维角色观察报告'
     )
     // “用户画像”主命令本身带参数，Koishi 在空格形式下会把“漫画”当成
     // 用户参数而不再继续匹配子命令；用快捷匹配改写为真正的子命令调用。
@@ -375,16 +397,14 @@ export function apply(ctx: Context, config: Config) {
             return '本群未启用群分析功能，请使用 群分析.启用 来启用本群的群分析功能。'
         if (!config.comic.enabled || !config.comic.userEnabled)
             return '请先在插件配置中启用漫画服务和用户画像漫画。'
-        let userId = user?.split(':').pop() || session.userId
+        if (user && !user.includes(':'))
+            return '请使用 @用户 指定要生成画像漫画的群友。'
+        const userId = user?.split(':').pop() || session.userId
         if (
             userId !== session.userId &&
             ((session as Session<User.Field>).user?.authority ?? 0) < 3
-        ) {
-            await session.send(
-                '你没有权限查看其他用户的画像。当前需要的权限为 3 级。将转为查看自己的画像。'
-            )
-            userId = session.userId
-        }
+        )
+            return '你没有权限生成其他用户的画像漫画，当前需要 Koishi 权限等级 3。'
         if (!userId) return '无法获取目标用户信息。'
         try {
             const saved = await ctx.chatluna_group_analysis.getUserPersona(
@@ -393,7 +413,7 @@ export function apply(ctx: Context, config: Config) {
                 userId
             )
             if (!saved?.profile)
-                return '当前用户还没有用户画像，请先生成用户画像。'
+                return '该用户还没有已保存的用户画像，请先使用“用户画像”生成普通画像。'
             return await run(session, undefined, 1, {
                 ...saved.profile,
                 userId,

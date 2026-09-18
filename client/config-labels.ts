@@ -42,7 +42,6 @@ export const configLabels: Record<string, string> = {
     timeout: '请求超时',
     maxOutputTokens: '最大生成长度',
     userEnabled: '启用用户画像漫画',
-    userPrompt: '用户画像漫画提示词',
     presetMode: '漫画预设来源',
     autoSend: '自动发送群漫画',
     groupMode: '漫画群组范围',
@@ -56,19 +55,11 @@ export const configLabels: Record<string, string> = {
     characterDescription: '主角设定',
     cooldown: '漫画冷却时间',
     size: '漫画尺寸',
-    prompt: '群漫画提示词',
     personaAnalysisMessageInterval: '画像更新消息阈值',
     personaCacheLifetimeDays: '画像缓存天数',
     personaLookbackDays: '画像回溯天数',
     personaMaxMessages: '画像最大消息数',
-    personaMinMessages: '画像最低消息数',
-    promptTopic: '话题提示词',
-    promptUserTitles: '本期称号提示词',
-    promptGoldenQuotes: '金句提示词',
-    promptUserPersona: '长期画像提示词',
-    promptChatQuality: '聊天质量提示词',
-    promptQueryParser: '查询解析提示词',
-    promptQueryChat: '分析对话提示词'
+    personaMinMessages: '画像最低消息数'
 }
 
 export function localizeConfigLabels(view: HTMLElement) {

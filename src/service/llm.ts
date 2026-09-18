@@ -23,6 +23,15 @@ import {
     validateGroupComicStoryboard,
     validateUserComicStoryboard
 } from './validation'
+import {
+    promptChatQuality,
+    promptGoldenQuotes,
+    promptQueryChat,
+    promptQueryParser,
+    promptTopic,
+    promptUserPersona,
+    promptUserTitles
+} from '../analysis-prompts'
 
 const MAX_TOPICS = 5
 const MAX_USER_TITLES = 6
@@ -284,7 +293,7 @@ export class LLMService extends Service {
         signal?: AbortSignal
     ): Promise<SummaryTopic[]> {
         const prompt = this.fillAnalysisPrompt(
-            this.config.promptTopic
+            promptTopic
                 .replace('{messages}', messagesText)
                 .replace('{maxTopics}', String(MAX_TOPICS)),
             context
@@ -320,7 +329,7 @@ export class LLMService extends Service {
             .join('\n')
 
         const prompt = this.fillAnalysisPrompt(
-            this.config.promptUserTitles.replace('{users}', userSummaries),
+            promptUserTitles.replace('{users}', userSummaries),
             context
         )
         return this._callLLM<UserTitle[]>(
@@ -342,7 +351,7 @@ export class LLMService extends Service {
         context?: AnalysisPromptContext
     ): Promise<GoldenQuote[]> {
         const prompt = this.fillAnalysisPrompt(
-            this.config.promptGoldenQuotes
+            promptGoldenQuotes
                 .replace('{messages}', messagesText)
                 .replace('{maxGoldenQuotes}', String(maxQuotes)),
             context
@@ -362,10 +371,7 @@ export class LLMService extends Service {
     public async analyzeChatQuality(
         messagesText: string
     ): Promise<ChatQualityReview | null> {
-        const prompt = this.config.promptChatQuality.replace(
-            '{messages}',
-            messagesText
-        )
+        const prompt = promptChatQuality.replace('{messages}', messagesText)
         const response = await this._callLLM<
             ChatQualityReview | ChatQualityReview[]
         >(prompt, '聊天质量锐评', undefined)
@@ -412,7 +418,7 @@ export class LLMService extends Service {
         recentMessages: string,
         previousAnalysis?: string
     ): Promise<UserPersonaProfile | null> {
-        const filledPrompt = this.config.promptUserPersona
+        const filledPrompt = promptUserPersona
             .replace('{messages}', recentMessages || '（最近暂无发言记录）')
             .replace(
                 '{previousAnalysis}',
@@ -454,7 +460,7 @@ export class LLMService extends Service {
         currentUserId?: string
         currentUserName?: string
     }): Promise<QueryIntent | null> {
-        const prompt = this.config.promptQueryParser
+        const prompt = promptQueryParser
             .replace('{currentTime}', promptContext.currentTime)
             .replace('{timeZone}', promptContext.timeZone)
             .replace('{platform}', promptContext.platform)
@@ -502,7 +508,7 @@ export class LLMService extends Service {
         currentUserId?: string
         currentUserName?: string
     }): Promise<string | null> {
-        const prompt = this.config.promptQueryChat
+        const prompt = promptQueryChat
             .replace('{currentTime}', promptContext.currentTime)
             .replace('{groupName}', promptContext.groupName || '未知群聊')
             .replace('{guildId}', promptContext.guildId || '')

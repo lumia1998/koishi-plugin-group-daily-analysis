@@ -304,6 +304,10 @@ test('Google reference is inlineData; OpenAI reference is multipart edits', asyn
         if (config.format === 'google') {
             const body = JSON.parse(init!.body as string)
             assert.equal(
+                body.generationConfig.imageConfig.aspectRatio,
+                '3:4'
+            )
+            assert.equal(
                 body.contents[0].parts[1].inlineData.data,
                 png.toString('base64')
             )
@@ -323,15 +327,37 @@ test('Google reference is inlineData; OpenAI reference is multipart edits', asyn
         assert.equal(url, base + '/v1/images/edits')
         const form = init!.body as FormData
         assert.equal(form.get('prompt'), 'storyboard')
+        assert.equal(form.get('size'), '1024x1536')
         assert.deepEqual(
             Buffer.from(await (form.get('image') as Blob).arrayBuffer()),
             png
         )
         return json({ data: [{ b64_json: png.toString('base64') }] })
     })
-    assert.deepEqual(await generateImage(config, 'storyboard', png), png)
+    const portrait = { aspectRatio: '3:4', size: '1024x1536' }
+    assert.deepEqual(
+        await generateImage(
+            config,
+            'storyboard',
+            png,
+            undefined,
+            undefined,
+            portrait
+        ),
+        png
+    )
     config.format = 'openai'
-    assert.deepEqual(await generateImage(config, 'storyboard', png), png)
+    assert.deepEqual(
+        await generateImage(
+            config,
+            'storyboard',
+            png,
+            undefined,
+            undefined,
+            portrait
+        ),
+        png
+    )
     t.mock.restoreAll()
     t.mock.method(globalThis, 'fetch', async (url, init) => {
         assert.equal(url, base + '/v1/images/generations')

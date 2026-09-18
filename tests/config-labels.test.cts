@@ -5,6 +5,7 @@ import { configLabels } from '../client/config-labels'
 
 test('all schema property keys have Chinese display titles without renaming saved keys', () => {
     const visit = (schema: any) => {
+        if (schema.meta?.hidden) return
         for (const [key, value] of Object.entries(schema.dict || {})) {
             assert.match(configLabels[key] || '', /[\u4e00-\u9fff]/, key)
             visit(value)
@@ -17,4 +18,16 @@ test('all schema property keys have Chinese display titles without renaming save
     assert.equal(config.comic.userEnabled, false)
     assert.equal(config.maxConcurrentLLM, 4)
     assert.equal((config.comic as any).userBaseUrl, undefined)
+    for (const key of [
+        'prompt',
+        'userPrompt',
+        'promptTopic',
+        'promptUserTitles',
+        'promptGoldenQuotes',
+        'promptUserPersona',
+        'promptChatQuality',
+        'promptQueryParser',
+        'promptQueryChat'
+    ])
+        assert.equal(configLabels[key], undefined, key)
 })

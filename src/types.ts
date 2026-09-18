@@ -88,10 +88,7 @@ export interface UserPersonaProfile {
 }
 
 export type UserComicCategory =
-    | 'summary'
-    | 'keyTraits'
-    | 'interests'
-    | 'communicationStyle'
+    'summary' | 'keyTraits' | 'interests' | 'communicationStyle'
 
 export interface UserComicPanel {
     category: UserComicCategory

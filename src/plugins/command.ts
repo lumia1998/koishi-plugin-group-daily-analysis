@@ -1,5 +1,5 @@
 /* eslint-disable max-len, @typescript-eslint/no-explicit-any */
-import { Context, h, Session, User } from 'koishi'
+import { Context, h, Session } from 'koishi'
 import { Config } from '../config'
 import { generateTextReport, shouldListenToMessage } from '../utils'
 import { skinRegistry } from '../skins'
@@ -347,31 +347,20 @@ export function apply(ctx: Context, config: Config) {
             return `当前群 ${guildName} (${guildId}) 分析功能状态: ${enabled}`
         })
 
-    ctx.command('用户画像 [user:user]', '查看指定用户的画像')
+    ctx.command('用户画像', '生成并查看自己的普通用户画像')
         .alias('group-analysis.persona')
         .alias('群分析.用户画像')
         .usage(
-            '使用方法：/群分析.用户画像 @用户 或 /群分析.用户画像 <用户ID> 或 /群分析.用户画像。不带参数时查看当前用户。查看其他用户需要为 bot 管理员。'
+            '使用“用户画像”生成自己的普通画像；使用“用户画像 漫画”生成自己的漫画版，管理员可在漫画子命令后 @其他用户。'
         )
         .option('force', '-f 是否强制更新用户画像')
-        .action(async ({ session, options }, user) => {
+        .action(async ({ session, options }) => {
             if (session.isDirect) return '请在群聊中使用此命令。'
 
             if (!checkGroup(session))
                 return '本群未启用群分析功能，请使用 群分析.启用 来启用本群的群分析功能。'
 
-            let userId = user?.split(':')?.[1] ?? session.userId
-
-            if (
-                userId !== session.userId &&
-                ((session as Session<User.Field>).user?.authority ?? 0) < 3
-            ) {
-                await session.send(
-                    '你没有权限查看其他用户的画像。当前需要的权限为 3 级。将转为查看自己的画像。'
-                )
-                userId = session.userId
-            }
-
+            const userId = session.userId
             if (!userId) {
                 return '无法获取目标用户信息。'
             }

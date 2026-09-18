@@ -155,7 +155,8 @@ export async function generateImage(
     prompt: string,
     reference?: Buffer | Buffer[],
     parentSignal?: AbortSignal,
-    trace?: Trace
+    trace?: Trace,
+    options: { aspectRatio?: string; size?: string } = {}
 ): Promise<Buffer> {
     const controller = new AbortController()
     const abort = () => controller.abort()
@@ -198,7 +199,9 @@ export async function generateImage(
                     contents: [{ role: 'user', parts }],
                     generationConfig: {
                         responseModalities: ['TEXT', 'IMAGE'],
-                        imageConfig: { aspectRatio: '16:9' }
+                        imageConfig: {
+                            aspectRatio: options.aspectRatio || '16:9'
+                        }
                     }
                 },
                 config.timeout,
@@ -224,7 +227,7 @@ export async function generateImage(
                 const body = new FormData()
                 body.append('model', config.model)
                 body.append('prompt', prompt)
-                body.append('size', config.size)
+                body.append('size', options.size || config.size)
                 references.forEach((item, index) =>
                     body.append(
                         'image',
@@ -250,7 +253,12 @@ export async function generateImage(
                 const data = await requestJson(
                     endpoint(config.baseUrl, '/v1/images/generations'),
                     config.apiKey,
-                    { model: config.model, prompt, size: config.size, n: 1 },
+                    {
+                        model: config.model,
+                        prompt,
+                        size: options.size || config.size,
+                        n: 1
+                    },
                     config.timeout,
                     {},
                     controller.signal,
