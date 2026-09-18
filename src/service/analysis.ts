@@ -306,7 +306,8 @@ export class AnalysisService extends Service {
                     channelId: target.channelId || target.guildId || '',
                     enabled: true
                 },
-                topics: result.topics
+                topics: result.topics,
+                analysisResult: result
             })
             .catch((error) => this.ctx.logger.warn('自动漫画任务失败。', error))
     }

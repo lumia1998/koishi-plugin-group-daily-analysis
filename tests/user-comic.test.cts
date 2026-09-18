@@ -16,7 +16,7 @@ import { validateUserComicStoryboard } from '../src/service/validation'
 import { getUserComicVisualSpec } from '../src/skins/user-comic'
 import { persona } from './theme-fixtures.cts'
 
-test('user comic combines structured panels with themed four-dimension reporting', () => {
+test('user comic image prompt keeps the report dimensions and theme direction', () => {
     const prompt = buildUserComicPrompt(
         Config({}).comic,
         persona,
@@ -45,14 +45,17 @@ test('user comic combines structured panels with themed four-dimension reporting
     assert.match(prompt, /不能覆盖此用户的性格/)
     assert.match(prompt, /不得虚构价格、链接、成绩/)
     const imagePrompt = buildUserComicImagePrompt(
-        '分镜',
+        Config({}).comic,
         true,
         true,
         'BlueArchive'
     )
     assert.match(imagePrompt, /附件 1 是用户画像报告/)
     assert.match(imagePrompt, /附件 2 及后续图片/)
-    assert.match(imagePrompt, /固定四个编号分镜/)
+    for (const dimension of ['总体概览', '性格特质', '兴趣爱好', '沟通风格'])
+        assert.match(imagePrompt, new RegExp(dimension))
+    assert.doesNotMatch(imagePrompt, /强制 JSON 分镜契约/)
+    assert.doesNotMatch(imagePrompt, /speech|15字内|caption/)
     const plan = validateUserComicStoryboard({
         panels: [
             {
@@ -189,34 +192,6 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
     let imageCalls = 0
     let textCalls = 0
     const sent: any[] = []
-    const storyboard = {
-        panels: [
-            {
-                category: 'summary',
-                scene: 'summary scene',
-                speech: '总结',
-                caption: '用户总结'
-            },
-            {
-                category: 'keyTraits',
-                scene: 'traits scene',
-                speech: '特质',
-                caption: '性格特质'
-            },
-            {
-                category: 'interests',
-                scene: 'interests scene',
-                speech: '兴趣',
-                caption: '兴趣爱好'
-            },
-            {
-                category: 'communicationStyle',
-                scene: 'style scene',
-                speech: '沟通',
-                caption: '沟通风格'
-            }
-        ]
-    }
     const config = Config({
         enableAllGroupsByDefault: true,
         comic: {
@@ -226,6 +201,12 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
             model: 'image',
             format: 'google'
         }
+    })
+    let started!: () => void
+    let releaseFetch!: () => void
+    let blockNextImage = false
+    const entered = new Promise<void>((resolve) => {
+        started = resolve
     })
     const ctx: any = {
         baseDir: process.cwd(),
@@ -267,7 +248,7 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
             }
         },
         chatluna_group_analysis_renderer: {
-            async renderUserPersona(
+            async renderUserPersonaReferenceImage(
                 profile: any,
                 username: string,
                 avatar: string,
@@ -285,16 +266,35 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
             },
             async generateUserComicStoryboard(prompt: string) {
                 textCalls++
-                assert.match(prompt, /铁路工作者/)
-                assert.match(prompt, /必须恰好输出 4 格/)
-                return storyboard
+                assert.fail(`must not request a storyboard: ${prompt}`)
             }
         }
     }
     t.mock.method(globalThis, 'fetch', async (_url: any, request: any) => {
         imageCalls++
         const body = JSON.parse(request.body)
-        assert.match(body.contents[0].parts[0].text, /固定四个编号分镜/)
+        if (blockNextImage) {
+            blockNextImage = false
+            started()
+            await new Promise<void>((resolve) => {
+                releaseFetch = resolve
+            })
+        }
+        assert.match(
+            body.contents[0].parts[0].text,
+            /四个分镜组成一张像报告一样的完整页面/
+        )
+        for (const dimension of [
+            '总体概览',
+            '性格特质',
+            '兴趣爱好',
+            '沟通风格'
+        ])
+            assert.match(body.contents[0].parts[0].text, new RegExp(dimension))
+        assert.doesNotMatch(
+            body.contents[0].parts[0].text,
+            /JSON|speech|15字内/
+        )
         assert.equal(body.generationConfig.imageConfig.aspectRatio, '3:4')
         assert.equal(
             body.contents[0].parts[1].inlineData.data,
@@ -344,7 +344,7 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
     await action({ session })
     assert.equal(ids.at(-1), 'self')
     assert.equal(imageCalls, 1)
-    assert.equal(textCalls, 1)
+    assert.equal(textCalls, 0)
     assert.ok(sent.some((item) => String(item).includes('<img')))
     assert.match(
         await action(
@@ -397,21 +397,7 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
     assert.equal(imageCalls, 2)
 
     config.comic.userEnabled = true
-    let started!: () => void
-    const entered = new Promise<void>((resolve) => {
-        started = resolve
-    })
-    let finish!: (result: typeof storyboard) => void
-    ctx.chatluna_group_analysis_llm.generateUserComicStoryboard = async (
-        _prompt: string,
-        signal: AbortSignal
-    ) => {
-        assert.equal(signal.aborted, false)
-        started()
-        return new Promise<typeof storyboard>((resolve) => {
-            finish = resolve
-        })
-    }
+    blockNextImage = true
     const fresh = { ...session, channelId: 'cancel' }
     const pending = action({ session: fresh })
     await entered
@@ -424,9 +410,9 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
         String(item).includes('<img')
     ).length
     events.dispose()
-    finish(storyboard)
+    releaseFetch()
     await pending
-    assert.equal(imageCalls, 2)
+    assert.equal(imageCalls, 3)
     assert.equal(
         sent.filter((item) => String(item).includes('<img')).length,
         imagesBefore

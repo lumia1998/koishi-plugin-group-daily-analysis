@@ -213,26 +213,30 @@ test('saved result survives send failure; recovery reuses it without fetching, L
     assert.equal(comics, 1)
 })
 
-test('comic starts before report rendering and is not awaited', async () => {
+test('comic receives the complete analysis report before rendering its reference image', async () => {
     const { service, ctx } = fixture()
     let started = false
+    let comicPayload: any
     service.config.comic.enabled = service.config.comic.autoSend = true
-    ctx.parallel = () => {
+    ctx.parallel = (_event: string, payload: any) => {
         started = true
+        comicPayload = payload
         return new Promise(() => {})
     }
     ctx.chatluna_group_analysis_renderer.renderGroupAnalysis = async () => {
         assert.equal(started, true)
         throw new Error('render failed')
     }
+    const analysis = result()
     await service.executeGroupAnalysis(
         'bot',
         { channelId: 'g' },
         1,
         'image',
         true,
-        result()
+        analysis
     )
+    assert.deepEqual(comicPayload.analysisResult, analysis)
 })
 
 test('history/redraw are scoped to the current group and enable action belongs to enable command', async () => {

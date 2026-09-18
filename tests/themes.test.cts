@@ -152,6 +152,16 @@ for (const skin of skinRegistry.getAllIds()) {
                         )
                     )
                 )
+                assert.ok(
+                    Buffer.isBuffer(
+                        await renderer.renderUserPersonaReferenceImage(
+                            persona,
+                            persona.username,
+                            '',
+                            config
+                        )
+                    )
+                )
                 for (const text of [
                     persona.userId,
                     persona.username,

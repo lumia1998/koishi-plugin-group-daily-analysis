@@ -200,7 +200,7 @@ test('all text formats send and extract their native wire formats', async (t) =>
                     }
                 ]
             }
-        ],
+        ]
     ] as const
     for (const [format, path, response] of cases) {
         config.format = format
@@ -208,9 +208,7 @@ test('all text formats send and extract their native wire formats', async (t) =>
         assert.equal(request.url, base + path)
         t.mock.method(globalThis, 'fetch', async (_url, init) => {
             const headers = new Headers(init?.headers)
-            if (
-                format === 'anthropic' || format === 'google'
-            )
+            if (format === 'anthropic' || format === 'google')
                 assert.equal(headers.has('Authorization'), false)
             else assert.equal(headers.get('Authorization'), 'Bearer test-key')
             const body = JSON.parse(init!.body as string)
@@ -244,12 +242,8 @@ test('all text formats send and extract their native wire formats', async (t) =>
 })
 
 test('refused, truncated, failed, malformed and canceled responses fail safely', async (t) => {
-    assert.throws(() =>
-        extractText('openai', { status: 'incomplete' })
-    )
-    assert.throws(() =>
-        extractText('anthropic', { stop_reason: 'max_tokens' })
-    )
+    assert.throws(() => extractText('openai', { status: 'incomplete' }))
+    assert.throws(() => extractText('anthropic', { stop_reason: 'max_tokens' }))
     assert.throws(() =>
         extractText('google', {
             candidates: [{ finishReason: 'SAFETY' }]
@@ -303,10 +297,7 @@ test('Google reference is inlineData; OpenAI reference is multipart edits', asyn
     t.mock.method(globalThis, 'fetch', async (url, init) => {
         if (config.format === 'google') {
             const body = JSON.parse(init!.body as string)
-            assert.equal(
-                body.generationConfig.imageConfig.aspectRatio,
-                '3:4'
-            )
+            assert.equal(body.generationConfig.imageConfig.aspectRatio, '3:4')
             assert.equal(
                 body.contents[0].parts[1].inlineData.data,
                 png.toString('base64')
@@ -411,7 +402,7 @@ test('LLM service parses plain JSON and fenced YAML without ChatLuna', async (t)
     }
 })
 
-test('comic pipeline passes topics to storyboard, enforces cooldown and group guards', async (t) => {
+test('comic pipeline uses the group report image and enforces cooldown and group guards', async (t) => {
     const config = Config({
         enableAllGroupsByDefault: true,
         comic: { enabled: true, baseUrl: base, model: 'image-model' }
@@ -480,27 +471,29 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
                 assert.equal(typeof text, 'string')
                 return [{ topic: 'test', detail: 'topic details' }]
             },
-            async generateGroupComicStoryboard(
-                prompt: string,
-                topics: unknown[]
-            ) {
-                assert.ok(prompt.includes('topic details'))
-                assert.equal(topics.length, 1)
-                return {
-                    panels: [
-                        {
-                            topicIndex: 1,
-                            topicTitle: 'test',
-                            scene: 'storyboard scene',
-                            speech: '测试台词',
-                            caption: '测试标题'
-                        }
-                    ]
-                }
+            generateGroupComicStoryboard() {
+                assert.fail('群漫画不应再请求文本分镜')
+            }
+        },
+        chatluna_group_analysis_renderer: {
+            async renderGroupAnalysis(result: any, passedConfig: any) {
+                assert.equal(result.topics[0].topic, 'test')
+                assert.equal(passedConfig.skin, config.skin)
+                return png
             }
         }
     }
-    t.mock.method(globalThis, 'fetch', async () => {
+    t.mock.method(globalThis, 'fetch', async (_url: any, request: any) => {
+        const body = JSON.parse(request.body)
+        assert.match(
+            body.contents[0].parts[0].text,
+            /查看附件 1 的今日话题部分/
+        )
+        assert.doesNotMatch(body.contents[0].parts[0].text, /JSON|storyboard/)
+        assert.equal(
+            body.contents[0].parts[1].inlineData.data,
+            png.toString('base64')
+        )
         calls++
         return json({
             candidates: [

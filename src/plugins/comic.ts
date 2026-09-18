@@ -1,10 +1,13 @@
 import { Context, h, Session, User } from 'koishi'
 import { Config, GroupListener } from '../config'
-import type { SummaryTopic, UserPersonaProfile } from '../types'
+import type {
+    GroupAnalysisResult,
+    StoredMessage,
+    SummaryTopic,
+    UserPersonaProfile
+} from '../types'
 import {
     buildUserComicImagePrompt,
-    buildUserComicPrompt,
-    formatUserComicStoryboard,
     getUserComicImageOptions
 } from '../user-comic-prompts'
 import {
@@ -20,12 +23,7 @@ import {
     loadReferences
 } from '../service/image'
 import { createTrace, errorDetail, errorKind } from '../diagnostics'
-import {
-    buildComicImagePrompt,
-    buildStoryboardPrompt,
-    formatGroupComicStoryboard
-} from '../comic-prompts'
-import { comicPreset } from '../service/preset'
+import { buildGroupComicImagePrompt } from '../comic-prompts'
 import { ConcurrencyLimiter } from '../service/limiter'
 import { createHash } from 'node:crypto'
 
@@ -41,6 +39,7 @@ declare module 'koishi' {
         'group-daily-analysis/auto-comic'(payload: {
             group: GroupListener
             topics?: SummaryTopic[]
+            analysisResult?: GroupAnalysisResult
         }): Promise<void>
     }
 }
@@ -50,6 +49,48 @@ export function todayWindow(now = new Date(), days = 1) {
     if (days <= 1) startTime.setHours(0, 0, 0, 0)
     else startTime.setTime(startTime.getTime() - days * 24 * 60 * 60 * 1000)
     return { startTime, endTime: now }
+}
+
+function buildStandaloneGroupReport(
+    messages: StoredMessage[],
+    topics: SummaryTopic[],
+    groupName: string,
+    days: number
+): GroupAnalysisResult {
+    const stats = calculateBasicStats(messages)
+    const userStats = Object.values(stats.userStats).sort(
+        (left, right) => right.messageCount - left.messageCount
+    )
+    const activeHoursData: Record<number, number> = {}
+    for (const user of userStats)
+        for (const [hour, count] of Object.entries(user.activeHours))
+            activeHoursData[Number(hour)] =
+                (activeHoursData[Number(hour)] || 0) + count
+
+    const mostActivePeriod = Object.entries(activeHoursData).sort(
+        (left, right) => right[1] - left[1]
+    )[0]?.[0]
+
+    const window = todayWindow(new Date(), days)
+    return {
+        totalMessages: messages.length,
+        totalChars: stats.totalChars,
+        totalParticipants: userStats.length,
+        emojiCount: stats.totalEmojiCount,
+        mostActiveUser: userStats[0] || null,
+        mostActivePeriod: mostActivePeriod
+            ? `${mostActivePeriod.padStart(2, '0')}:00`
+            : '暂无记录',
+        userStats,
+        topics,
+        userTitles: [],
+        goldenQuotes: [],
+        chatQuality: null,
+        activeHoursChart: '',
+        activeHoursData,
+        analysisDate: `${window.startTime.toLocaleString('zh-CN')} 至 ${window.endTime.toLocaleString('zh-CN')}`,
+        groupName
+    }
 }
 
 export function apply(ctx: Context, config: Config) {
@@ -73,7 +114,8 @@ export function apply(ctx: Context, config: Config) {
         >,
         topics?: SummaryTopic[],
         days = 1,
-        profile?: UserPersonaProfile
+        profile?: UserPersonaProfile,
+        analysisResult?: GroupAnalysisResult
     ) => {
         if (!session || session.isDirect) return '请在群聊中使用群漫画。'
         if (!config.comic?.enabled) return '请先在插件配置中启用漫画功能。'
@@ -159,7 +201,6 @@ export function apply(ctx: Context, config: Config) {
         trace('任务开始', { group: key })
         running.set(key, controller)
         try {
-            const presetName = comicPreset(config)
             const primaryReference = await loadReference(
                 selected ? '' : config.comic.referenceImage,
                 ctx.baseDir
@@ -175,7 +216,7 @@ export function apply(ctx: Context, config: Config) {
             if (profile) {
                 stage = '渲染画像参考图'
                 const report =
-                    await ctx.chatluna_group_analysis_renderer.renderUserPersona(
+                    await ctx.chatluna_group_analysis_renderer.renderUserPersonaReferenceImage(
                         profile,
                         profile.username || profile.userId,
                         session.platform === 'onebot'
@@ -184,27 +225,25 @@ export function apply(ctx: Context, config: Config) {
                         config
                     )
                 if (Buffer.isBuffer(report)) reportReference = report
-                else
-                    trace('画像参考图渲染失败，继续使用结构化画像', {
-                        report
-                    })
+                else throw new Error(`用户画像报告参考图生成失败：${report}`)
+            } else if (analysisResult) {
+                stage = '渲染群分析参考图'
+                const report =
+                    await ctx.chatluna_group_analysis_renderer.renderGroupAnalysis(
+                        analysisResult,
+                        config
+                    )
+                if (Buffer.isBuffer(report)) reportReference = report
+                else throw new Error(`群分析报告参考图生成失败：${report}`)
             }
-            const references = reportReference
-                ? [reportReference, ...characterReferences]
-                : characterReferences
-            trace('参考图读取完成', {
-                bytes: references.reduce((sum, item) => sum + item.length, 0),
-                count: references.length,
-                hasReportReference: !!reportReference,
-                characterReferences: characterReferences.length
-            })
             stage = profile ? '读取已有画像' : '获取当天消息'
             await session.send(
                 profile
-                    ? '正在将已有画像特点转化为漫画分镜，请稍候。'
+                    ? '正在根据已有用户画像报告生成漫画，请稍候。'
                     : '正在提取群话题并生成漫画，请稍候。'
             )
-            let resolvedTopics = topics
+            let resolvedTopics = analysisResult?.topics ?? topics
+            let reportMessages: StoredMessage[] = []
             if (!profile && resolvedTopics === undefined) {
                 const messages =
                     await ctx.chatluna_group_analysis_message.getHistoricalMessages(
@@ -225,6 +264,7 @@ export function apply(ctx: Context, config: Config) {
                             message.content
                         )
                 )
+                reportMessages = filtered
                 trace('消息获取完成', {
                     total: messages.length,
                     filtered: filtered.length,
@@ -248,63 +288,73 @@ export function apply(ctx: Context, config: Config) {
                 (!Array.isArray(resolvedTopics) || !resolvedTopics.length)
             )
                 return '未提取到有效话题。'
+            if (!profile && !reportReference) {
+                stage = '渲染群分析参考图'
+                const groupTopics = resolvedTopics || []
+                const report =
+                    await ctx.chatluna_group_analysis_renderer.renderGroupAnalysis(
+                        buildStandaloneGroupReport(
+                            reportMessages,
+                            groupTopics,
+                            groupId || '当前群聊',
+                            days
+                        ),
+                        config
+                    )
+                if (Buffer.isBuffer(report)) reportReference = report
+                else throw new Error(`群分析报告参考图生成失败：${report}`)
+            }
+            const comicReferences = reportReference
+                ? [reportReference, ...characterReferences]
+                : characterReferences
+            const groupTopics = resolvedTopics || []
+            trace('参考图读取完成', {
+                bytes: comicReferences.reduce(
+                    (sum, item) => sum + item.length,
+                    0
+                ),
+                count: comicReferences.length,
+                hasReportReference: !!reportReference,
+                characterReferences: characterReferences.length
+            })
             trace('素材读取完成', {
                 topics: resolvedTopics?.length || 0,
-                persona: !!profile
+                persona: !!profile,
+                hasReportReference: !!reportReference
             })
-            stage = '生成分镜'
-            const prompt = profile
-                ? buildUserComicPrompt(
-                      comicConfig,
-                      profile,
-                      !!reportReference,
-                      characterReferences.length > 0,
-                      config.skin
-                  )
-                : buildStoryboardPrompt(
-                      comicConfig,
-                      resolvedTopics,
-                      references.length > 0
-                  )
-            const storyboard = profile
-                ? formatUserComicStoryboard(
-                      await ctx.chatluna_group_analysis_llm.generateUserComicStoryboard(
-                          prompt,
-                          controller.signal,
-                          presetName
-                      ),
-                      profile
-                  )
-                : formatGroupComicStoryboard(
-                      await ctx.chatluna_group_analysis_llm.generateGroupComicStoryboard(
-                          prompt,
-                          resolvedTopics,
-                          controller.signal,
-                          presetName
-                      ),
-                      resolvedTopics
-                  )
+            let imagePrompt: string
+            if (profile) {
+                imagePrompt = buildUserComicImagePrompt(
+                    comicConfig,
+                    !!reportReference,
+                    characterReferences.length > 0,
+                    config.skin
+                )
+                trace('用户画像漫画图片提示准备完成', {
+                    promptChars: imagePrompt.length,
+                    directImageFlow: true
+                })
+            } else {
+                imagePrompt = buildGroupComicImagePrompt(
+                    comicConfig,
+                    !!reportReference,
+                    characterReferences.length > 0,
+                    groupTopics.length,
+                    config.skin
+                )
+                trace('群漫画图片提示准备完成', {
+                    promptChars: imagePrompt.length,
+                    directImageFlow: true
+                })
+            }
             if (controller.signal.aborted) return
             lastRun.set(key, Date.now())
-            trace('分镜生成完成', { chars: storyboard.length })
             stage = '调用生图 API'
             const image = await imageLimiter.run(() =>
                 generateImage(
                     comicConfig,
-                    profile
-                        ? buildUserComicImagePrompt(
-                              storyboard,
-                              !!reportReference,
-                              characterReferences.length > 0,
-                              config.skin
-                          )
-                        : buildComicImagePrompt(
-                              storyboard,
-                              comicConfig,
-                              references.length > 0,
-                              resolvedTopics.length
-                          ),
-                    references,
+                    imagePrompt,
+                    comicReferences,
                     controller.signal,
                     trace,
                     profile ? getUserComicImageOptions(config.skin) : undefined
@@ -427,8 +477,14 @@ export function apply(ctx: Context, config: Config) {
     })
 
     ctx.on('group-daily-analysis/auto-comic', async (payload) => {
-        const { group, topics } =
-            'group' in payload ? payload : { group: payload, topics: undefined }
+        const { group, topics, analysisResult } =
+            'group' in payload
+                ? payload
+                : {
+                      group: payload,
+                      topics: undefined,
+                      analysisResult: undefined
+                  }
         trace('定时漫画触发', {
             enabled: !!config.comic?.enabled,
             autoSend: !!config.comic?.autoSend
@@ -452,7 +508,10 @@ export function apply(ctx: Context, config: Config) {
                 isDirect: false,
                 send
             },
-            topics
+            topics,
+            1,
+            undefined,
+            analysisResult
         )
         if (error) await send(error)
     })

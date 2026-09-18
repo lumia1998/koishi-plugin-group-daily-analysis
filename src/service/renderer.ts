@@ -427,11 +427,31 @@ export class RendererService extends Service {
         )
     }
 
-    private async renderUserPersonaInternal(
+    /**
+     * Render the report image used as the first reference for user comics.
+     *
+     * The comic model needs the four profile dimensions, but the evidence
+     * board and footer are implementation details of the normal report. Hide
+     * those nodes in the temporary page before taking the screenshot so every
+     * skin keeps its own layout and visual language.
+     */
+    public async renderUserPersonaReferenceImage(
         data: UserPersonaProfile,
         username: string,
         avatar: string,
         config: Config
+    ): Promise<Buffer | string> {
+        return this.limiter.run(() =>
+            this.renderUserPersonaInternal(data, username, avatar, config, true)
+        )
+    }
+
+    private async renderUserPersonaInternal(
+        data: UserPersonaProfile,
+        username: string,
+        avatar: string,
+        config: Config,
+        referenceOnly = false
     ): Promise<Buffer | string> {
         try {
             let theme = config.theme
@@ -454,6 +474,40 @@ export class RendererService extends Service {
                     throw new Error(
                         `无法在渲染的 HTML 中找到 ${selector} 元素。`
                     )
+                }
+
+                if (referenceOnly) {
+                    await page.evaluate(() => {
+                        const root = document.querySelector<HTMLElement>(
+                            'body[data-report="persona"]'
+                        )
+                        if (!root) return
+
+                        root.querySelectorAll<HTMLElement>(
+                            '.evidence-section, .evidence-list-container, ' +
+                                '.evidence-content, .records, .card-grid, ' +
+                                'footer, .newspaper-footer'
+                        ).forEach((node) => {
+                            node.style.display = 'none'
+                        })
+
+                        const evidenceTitle = Array.from(
+                            root.querySelectorAll<HTMLElement>(
+                                '.section-title, .section-label, h2, h3'
+                            )
+                        ).find((node) =>
+                            /事实依据|观察记录|代表记录/.test(
+                                node.textContent || ''
+                            )
+                        )
+                        if (evidenceTitle) {
+                            const heading =
+                                evidenceTitle.closest<HTMLElement>(
+                                    '.section-header, .article-block, .evidence-section'
+                                ) || evidenceTitle
+                            heading.style.display = 'none'
+                        }
+                    })
                 }
 
                 const imageBuffer = await element.screenshot()

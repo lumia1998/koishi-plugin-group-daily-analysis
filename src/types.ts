@@ -148,6 +148,7 @@ export interface ComicTrigger {
         enabled: boolean
     }
     topics?: SummaryTopic[]
+    analysisResult?: GroupAnalysisResult
 }
 
 export type QueryAction = '只分析' | '分析加对话' | '只对话'

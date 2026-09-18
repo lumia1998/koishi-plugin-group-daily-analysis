@@ -69,6 +69,19 @@ export async function verifyReports(browser: any) {
                                   '',
                                   theme
                               )
+                    if (kind === 'user') {
+                        const referenceImage =
+                            await renderer.renderUserPersonaReferenceImage(
+                                persona,
+                                persona.username,
+                                '',
+                                config
+                            )
+                        assert.ok(
+                            Buffer.isBuffer(referenceImage),
+                            `${skin}/${theme}: reference image failed`
+                        )
+                    }
                     try {
                         const text = await page.$eval(
                             'body',
