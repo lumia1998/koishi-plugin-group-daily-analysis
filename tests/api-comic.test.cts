@@ -416,7 +416,13 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
             }
         ],
         command(name: string, _description: string, options: any) {
-            if (name.startsWith('用户画像.漫画')) return { action() {} }
+            if (name.startsWith('用户画像.漫画'))
+                return {
+                    shortcut() {
+                        return this
+                    },
+                    action() {}
+                }
             assert.equal(name, '群漫画 [days:number]')
             assert.equal(options.checkArgCount, true)
             return {
@@ -448,9 +454,23 @@ test('comic pipeline passes topics to storyboard, enforces cooldown and group gu
                 assert.equal(typeof text, 'string')
                 return [{ topic: 'test', detail: 'topic details' }]
             },
-            async generateText(prompt: string) {
+            async generateGroupComicStoryboard(
+                prompt: string,
+                topics: unknown[]
+            ) {
                 assert.ok(prompt.includes('topic details'))
-                return 'storyboard'
+                assert.equal(topics.length, 1)
+                return {
+                    panels: [
+                        {
+                            topicIndex: 1,
+                            topicTitle: 'test',
+                            scene: 'storyboard scene',
+                            speech: '测试台词',
+                            caption: '测试标题'
+                        }
+                    ]
+                }
             }
         }
     }

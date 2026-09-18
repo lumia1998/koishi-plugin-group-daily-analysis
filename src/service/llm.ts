@@ -4,8 +4,10 @@ import {
     AnalysisPromptContext,
     ChatQualityReview,
     GoldenQuote,
+    GroupComicStoryboard,
     QueryIntent,
     SummaryTopic,
+    UserComicStoryboard,
     UserPersonaProfile,
     UserStats,
     UserTitle
@@ -16,7 +18,11 @@ import { createTrace } from '../diagnostics'
 import { presetMessages } from './preset'
 import { ConcurrencyLimiter } from './limiter'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { validateAnalysisOutput } from './validation'
+import {
+    validateAnalysisOutput,
+    validateGroupComicStoryboard,
+    validateUserComicStoryboard
+} from './validation'
 
 const MAX_TOPICS = 5
 const MAX_USER_TITLES = 6
@@ -143,6 +149,39 @@ export class LLMService extends Service {
         return text
     }
 
+    /** 生成并校验群漫画分镜；话题覆盖不完整时仅重试文本模型。 */
+    public async generateGroupComicStoryboard(
+        prompt: string,
+        topics: SummaryTopic[],
+        signal?: AbortSignal,
+        presetName = this.config.preset || ''
+    ): Promise<GroupComicStoryboard> {
+        return this._callLLM<GroupComicStoryboard>(
+            prompt,
+            '群漫画分镜',
+            undefined,
+            signal,
+            presetName,
+            (data) => validateGroupComicStoryboard(data, topics)
+        )
+    }
+
+    /** 生成用户画像的固定四类分镜。 */
+    public async generateUserComicStoryboard(
+        prompt: string,
+        signal?: AbortSignal,
+        presetName = this.config.preset || ''
+    ): Promise<UserComicStoryboard> {
+        return this._callLLM<UserComicStoryboard>(
+            prompt,
+            '用户画像漫画分镜',
+            undefined,
+            signal,
+            presetName,
+            validateUserComicStoryboard
+        )
+    }
+
     public getUsage() {
         return {
             ...(this.usageTotals || {
@@ -165,7 +204,8 @@ export class LLMService extends Service {
         taskName: string,
         modelName?: string,
         signal?: AbortSignal,
-        presetName = this.config.preset || ''
+        presetName = this.config.preset || '',
+        validator?: (data: unknown) => T
     ): Promise<T> {
         const attempts = Math.max(0, this.config.llm.retryCount ?? 2)
         for (let attempt = 0; ; attempt++) {
@@ -180,7 +220,9 @@ export class LLMService extends Service {
             )
             try {
                 const data = load(fenced ? fenced[1] : text)
-                return validateAnalysisOutput(taskName, data) as T
+                return validator
+                    ? validator(data)
+                    : (validateAnalysisOutput(taskName, data) as T)
             } catch (error) {
                 if (attempt >= attempts || signal?.aborted) throw error
                 const delay =

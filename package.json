@@ -1,7 +1,7 @@
 {
     "name": "koishi-plugin-group-daily-analysis",
     "description": "基于 ChatLuna 的 Koishi 群聊日报、长期用户画像与群聊及用户画像漫画插件",
-    "version": "0.0.1-alpha.10",
+    "version": "0.0.1-alpha.11",
     "type": "module",
     "main": "lib/index.cjs",
     "module": "lib/index.mjs",

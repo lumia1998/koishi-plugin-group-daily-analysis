@@ -3,7 +3,8 @@ import { Config, GroupListener } from '../config'
 import type { SummaryTopic, UserPersonaProfile } from '../types'
 import {
     buildUserComicImagePrompt,
-    buildUserComicPrompt
+    buildUserComicPrompt,
+    formatUserComicStoryboard
 } from '../user-comic-prompts'
 import {
     calculateBasicStats,
@@ -13,11 +14,16 @@ import {
 import {
     generateImage,
     imageMime,
+    loadQQAvatar,
     loadReference,
     loadReferences
 } from '../service/image'
 import { createTrace, errorDetail, errorKind } from '../diagnostics'
-import { buildComicImagePrompt, buildStoryboardPrompt } from '../comic-prompts'
+import {
+    buildComicImagePrompt,
+    buildStoryboardPrompt,
+    formatGroupComicStoryboard
+} from '../comic-prompts'
 import { comicPreset } from '../service/preset'
 import { ConcurrencyLimiter } from '../service/limiter'
 import { createHash } from 'node:crypto'
@@ -150,12 +156,28 @@ export function apply(ctx: Context, config: Config) {
                 comicConfig.referenceImages,
                 ctx.baseDir
             )
-            const references = primaryReference
+            const characterReferences = primaryReference
                 ? [primaryReference, ...extraReferences]
                 : extraReferences
+            const avatarReference =
+                profile && session.platform === 'onebot'
+                    ? await loadQQAvatar(
+                          profile.userId,
+                          controller.signal
+                      ).catch((error) => {
+                          trace('用户头像读取失败', {
+                              reason: errorKind(error)
+                          })
+                          return undefined
+                      })
+                    : undefined
+            const references = avatarReference
+                ? [avatarReference, ...characterReferences]
+                : characterReferences
             trace('参考图读取完成', {
                 bytes: references.reduce((sum, item) => sum + item.length, 0),
-                count: references.length
+                count: references.length,
+                avatar: !!avatarReference
             })
             stage = profile ? '读取已有画像' : '获取当天消息'
             await session.send(
@@ -216,26 +238,33 @@ export function apply(ctx: Context, config: Config) {
                 ? buildUserComicPrompt(
                       comicConfig,
                       profile,
-                      references.length > 0
+                      !!avatarReference,
+                      characterReferences.length > 0
                   )
                 : buildStoryboardPrompt(
                       comicConfig,
                       resolvedTopics,
                       references.length > 0
                   )
-            const storyboard =
-                await ctx.chatluna_group_analysis_llm.generateText(
-                    prompt,
-                    undefined,
-                    controller.signal,
-                    presetName
-                )
+            const storyboard = profile
+                ? formatUserComicStoryboard(
+                      await ctx.chatluna_group_analysis_llm.generateUserComicStoryboard(
+                          prompt,
+                          controller.signal,
+                          presetName
+                      ),
+                      profile
+                  )
+                : formatGroupComicStoryboard(
+                      await ctx.chatluna_group_analysis_llm.generateGroupComicStoryboard(
+                          prompt,
+                          resolvedTopics,
+                          controller.signal,
+                          presetName
+                      ),
+                      resolvedTopics
+                  )
             if (controller.signal.aborted) return
-            if (
-                profile &&
-                storyboard.trim() === '画像资料不足，无法生成三个有依据的分镜。'
-            )
-                return '画像资料不足，无法生成三个有依据的分镜。请先积累更多画像信息。'
             lastRun.set(key, Date.now())
             trace('分镜生成完成', { chars: storyboard.length })
             stage = '调用生图 API'
@@ -245,7 +274,8 @@ export function apply(ctx: Context, config: Config) {
                     profile
                         ? buildUserComicImagePrompt(
                               storyboard,
-                              references.length > 0
+                              !!avatarReference,
+                              characterReferences.length > 0
                           )
                         : buildComicImagePrompt(
                               storyboard,
@@ -260,8 +290,28 @@ export function apply(ctx: Context, config: Config) {
             )
             stage = '发送漫画'
             if (!controller.signal.aborted) {
-                await session.send(h.image(image, imageMime(image)))
-                trace('发送完成', { bytes: image.length })
+                const receipts = await session.send(
+                    h.image(image, imageMime(image))
+                )
+                const messageIds = Array.isArray(receipts)
+                    ? receipts.filter((id): id is string =>
+                          Boolean(id && id !== 'undefined' && id !== 'null')
+                      )
+                    : []
+                // Satori 的 send() 应返回至少一条消息回执。此前无论适配器是否
+                // 确认投递都会记录“发送完成”，导致 OneBot 的静默发送失败难以定位。
+                if (Array.isArray(receipts) && !messageIds.length)
+                    throw new Error(
+                        '平台未确认图片消息：发送接口没有返回有效消息 ID。'
+                    )
+                trace('发送完成', {
+                    bytes: image.length,
+                    receiptCount: Array.isArray(receipts)
+                        ? receipts.length
+                        : undefined,
+                    messageIdCount: messageIds.length,
+                    messageIds: messageIds.join(',')
+                })
             }
         } catch (error) {
             const detail = errorDetail(error, [
@@ -303,10 +353,17 @@ export function apply(ctx: Context, config: Config) {
             return run(session, undefined, count)
         })
 
-    ctx.command(
+    const userComicCommand = ctx.command(
         '用户画像.漫画 [user:user]',
         '将已保存的长期用户画像生成三至四格漫画'
-    ).action(async ({ session }, user) => {
+    )
+    // “用户画像”主命令本身带参数，Koishi 在空格形式下会把“漫画”当成
+    // 用户参数而不再继续匹配子命令；用快捷匹配改写为真正的子命令调用。
+    userComicCommand.shortcut('用户画像 漫画', {
+        prefix: true,
+        fuzzy: true
+    })
+    userComicCommand.action(async ({ session }, user) => {
         if (session.isDirect) return '请在群聊中使用此命令。'
         if (
             !shouldListenToMessage(

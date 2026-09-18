@@ -44,6 +44,20 @@ export interface SummaryTopic {
     detail: string
 }
 
+// 群漫画的文本分镜。topicIndex 是唯一允许模型选择的话题标识，
+// 标题和详情始终由本地原始话题重新绑定，避免模型自行错配话题。
+export interface GroupComicPanel {
+    topicIndex: number
+    topicTitle: string
+    scene: string
+    speech: string
+    caption: string
+}
+
+export interface GroupComicStoryboard {
+    panels: GroupComicPanel[]
+}
+
 // 用户称号
 export interface UserTitle {
     name: string
@@ -71,6 +85,23 @@ export interface UserPersonaProfile {
     analysisDate?: string
     evidence: string[]
     lastMergedFromHistory?: boolean
+}
+
+export type UserComicCategory =
+    | 'summary'
+    | 'keyTraits'
+    | 'interests'
+    | 'communicationStyle'
+
+export interface UserComicPanel {
+    category: UserComicCategory
+    scene: string
+    speech: string
+    caption: string
+}
+
+export interface UserComicStoryboard {
+    panels: UserComicPanel[]
 }
 
 export interface ChatQualityDimension {

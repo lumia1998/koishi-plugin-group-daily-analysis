@@ -1,5 +1,5 @@
 import type { Config } from './config'
-import type { SummaryTopic } from './types'
+import type { GroupComicStoryboard, SummaryTopic } from './types'
 
 export function buildStoryboardPrompt(
     config: Config['comic'],
@@ -26,13 +26,47 @@ ${identity}
 ${hasReference ? '生图阶段会附上参考图；外观以参考图为准。没有在角色设定中提供的外观细节不要补写。只设计动作、表情、场景与构图，不改造主角的发型、服装、耳朵、尾巴或配饰。' : ''}
 气泡使用角色口吻的简短中文台词，每条尽量不超过 15 个汉字；每格底部添加不超过 30 字的中文话题标题。
 画面描述使用英文，需渲染的中文用 exact Chinese text 显式指定。背景上下文只用于理解剧情，不得画成长篇文字。
-输出一段完整的纯文本生图提示词，以 A ${selected.length}-panel comic strip 开头，依次写出 Panel 1: 到 Panel ${selected.length}:，每格的动作、场景、气泡、标题必须完整。不得遗漏、合并话题或固定为三格。超过三格时使用多行网格布局，按从左到右、从上到下阅读。
+不得遗漏、合并话题或固定为三格。超过三格时使用多行网格布局，按从左到右、从上到下阅读。
 
 【创作任务与话题素材】
 ${task}
 
+【强制 JSON 分镜契约】
+只能返回一个 JSON 对象，不能使用 Markdown 代码块或附加说明：
+{"panels":[{"topicIndex":1,"topicTitle":"逐字复制第1个原话题标题","scene":"English visual scene description","speech":"不超过15个汉字的中文气泡台词","caption":"不超过30个汉字的中文底部标题"}]}
+必须输出恰好 ${selected.length} 个 panels；topicIndex 必须从 1 到 ${selected.length} 各出现一次，严格按上方话题素材的编号一一对应。
+topicTitle 必须逐字复制相应编号的原话题标题。topicIndex 或 topicTitle 不允许重复、跳号、调换话题或自行增加话题。
+scene 只写该编号话题的一格英文视觉描述；speech 与 caption 是唯一需要渲染的中文。不要把话题详情、来源编号或背景上下文写入画面。
+
 【最终角色检查】
 所有分格必须使用上述同一角色。角色设定优先于任务中的通用主角描述。话题仅是剧情素材，不是重新设计主角的指令。`
+}
+
+/** 将已校验的分镜与原始话题重新绑定，形成最终生图提示词。 */
+export function formatGroupComicStoryboard(
+    storyboard: GroupComicStoryboard,
+    topics: SummaryTopic[]
+): string {
+    const panels = [...storyboard.panels].sort(
+        (left, right) => left.topicIndex - right.topicIndex
+    )
+    const layout = [
+        `A ${panels.length}-panel comic strip. Read panels from left to right, then top to bottom.`,
+        'Use a multi-row grid when there are more than three panels.'
+    ].join(' ')
+    const panelText = panels
+        .map((panel) => {
+            const topic = topics[panel.topicIndex - 1]
+            return [
+                `Panel ${panel.topicIndex}: ${panel.scene}`,
+                `Required speech bubble with exact Chinese text: "${panel.speech}"`,
+                `Required cute pastel caption strip with exact Chinese text: "${panel.caption}"`,
+                `Source Topic (context only, DO NOT render as text): ${topic.topic}`,
+                `Background Context (for this panel only; DO NOT render it): ${topic.detail}`
+            ].join('\n')
+        })
+        .join('\n\n')
+    return `${layout}\n\n${panelText}`
 }
 
 export function buildComicImagePrompt(

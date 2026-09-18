@@ -8,28 +8,57 @@ import { apply } from '../src/plugins/comic'
 import {
     buildUserComicPrompt,
     buildUserComicImagePrompt,
-    defaultUserComicPrompt
+    defaultUserComicPrompt,
+    formatUserComicStoryboard
 } from '../src/user-comic-prompts'
+import { validateUserComicStoryboard } from '../src/service/validation'
 import { persona } from './theme-fixtures.cts'
 
-test('user prompt maps grounded traits to panels, keeping evidence behind the scenes', () => {
-    const prompt = buildUserComicPrompt(Config({}).comic, persona, true)
+test('user comic has four fixed profile-category panels and keeps evidence behind the scenes', () => {
+    const prompt = buildUserComicPrompt(Config({}).comic, persona, true, true)
     assert.equal(prompt.split(defaultUserComicPrompt).length, 2)
     for (const text of [
         '核心人设',
         '语言风格',
         '兴趣',
         '行为特点',
-        '反差感',
-        '一个特点对应一个分镜',
+        '用户总结',
+        '性格特质',
+        '沟通风格',
+        'category',
         persona.summary,
         ...persona.evidence
     ])
         assert.ok(prompt.includes(text), text)
-    assert.match(prompt, /不足四个.*三格/)
-    assert.match(prompt, /不要把大段聊天记录画进气泡/)
+    assert.match(prompt, /必须恰好输出 4 格/)
     assert.match(prompt, /不能覆盖此用户的性格/)
-    assert.doesNotMatch(buildUserComicImagePrompt('分镜', true), /per topic/)
+    assert.match(
+        buildUserComicImagePrompt('分镜', true, true),
+        /第一张附件是用户头像/
+    )
+    const plan = validateUserComicStoryboard({
+        panels: [
+            { category: 'interests', scene: 'interest', speech: '兴趣', caption: '爱好' },
+            { category: 'summary', scene: 'summary', speech: '总结', caption: '用户总结' },
+            { category: 'communicationStyle', scene: 'style', speech: '说话', caption: '沟通风格' },
+            { category: 'keyTraits', scene: 'trait', speech: '特质', caption: '性格特质' }
+        ]
+    })
+    const storyboard = formatUserComicStoryboard(plan, persona)
+    assert.match(storyboard, /Panel 1 — 用户总结: summary/)
+    assert.match(storyboard, /Panel 4 — 沟通风格: style/)
+    assert.throws(
+        () =>
+            validateUserComicStoryboard({
+                panels: [
+                    { category: 'summary', scene: 'a', speech: 'a', caption: 'a' },
+                    { category: 'summary', scene: 'b', speech: 'b', caption: 'b' },
+                    { category: 'interests', scene: 'c', speech: 'c', caption: 'c' },
+                    { category: 'keyTraits', scene: 'd', speech: 'd', caption: 'd' }
+                ]
+            }),
+        /恰好覆盖/
+    )
 })
 
 test('user comic reads saved profile, shares provider/cooldown and respects persona permissions', async (t) => {
@@ -44,6 +73,18 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
     let imageCalls = 0
     let textCalls = 0
     const sent: any[] = []
+    const avatarPng = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
+        'base64'
+    )
+    const storyboard = {
+        panels: [
+            { category: 'summary', scene: 'summary scene', speech: '总结', caption: '用户总结' },
+            { category: 'keyTraits', scene: 'traits scene', speech: '特质', caption: '性格特质' },
+            { category: 'interests', scene: 'interests scene', speech: '兴趣', caption: '兴趣爱好' },
+            { category: 'communicationStyle', scene: 'style scene', speech: '沟通', caption: '沟通风格' }
+        ]
+    }
     const config = Config({
         enableAllGroupsByDefault: true,
         comic: {
@@ -66,6 +107,9 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
                     return this
                 },
                 alias() {
+                    return this
+                },
+                shortcut() {
                     return this
                 },
                 action(fn: Function) {
@@ -94,18 +138,27 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
             summarizeTopics() {
                 assert.fail('must not summarize topics')
             },
-            async generateText(prompt: string) {
+            async generateUserComicStoryboard(prompt: string) {
                 textCalls++
                 assert.match(prompt, /铁路工作者/)
-                return '四格布局：核心人设、语言风格、兴趣与反差，每格有画像依据。'
+                assert.match(prompt, /必须恰好输出 4 格/)
+                return storyboard
             }
         }
     }
-    t.mock.method(globalThis, 'fetch', async (_url: any, request: any) => {
+    t.mock.method(globalThis, 'fetch', async (url: any, request: any) => {
+        if (String(url).startsWith('https://q1.qlogo.cn/'))
+            return new Response(avatarPng, {
+                headers: { 'Content-Type': 'image/png' }
+            })
         imageCalls++
         const body = JSON.parse(request.body)
-        assert.match(body.contents[0].parts[0].text, /一个特点对应一个分镜/)
-        assert.equal(body.contents[0].parts[1].inlineData.data, 'iVBORw0KGgo=')
+        assert.match(body.contents[0].parts[0].text, /第一张附件是用户头像/)
+        assert.equal(
+            body.contents[0].parts[1].inlineData.data,
+            avatarPng.toString('base64')
+        )
+        assert.equal(body.contents[0].parts[2].inlineData.data, 'iVBORw0KGgo=')
         return new Response(
             JSON.stringify({
                 candidates: [
@@ -130,7 +183,10 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
         userId: 'self',
         user: { authority: 1 },
         isDirect: false,
-        send: async (value: any) => sent.push(value)
+        send: async (value: any) => {
+            sent.push(value)
+            return ['message-id']
+        }
     }
     saved = null
     assert.equal(
@@ -181,15 +237,14 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
     const entered = new Promise<void>((resolve) => {
         started = resolve
     })
-    let finish!: (text: string) => void
-    ctx.chatluna_group_analysis_llm.generateText = async (
+    let finish!: (result: typeof storyboard) => void
+    ctx.chatluna_group_analysis_llm.generateUserComicStoryboard = async (
         _prompt: string,
-        _model: unknown,
         signal: AbortSignal
     ) => {
         assert.equal(signal.aborted, false)
         started()
-        return new Promise<string>((resolve) => {
+        return new Promise<typeof storyboard>((resolve) => {
             finish = resolve
         })
     }
@@ -205,15 +260,11 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
         String(item).includes('<img')
     ).length
     events.dispose()
-    finish('四格漫画')
+    finish(storyboard)
     await pending
     assert.equal(imageCalls, 3)
     assert.equal(
         sent.filter((item) => String(item).includes('<img')).length,
         imagesBefore
     )
-    ctx.chatluna_group_analysis_llm.generateText = async () =>
-        '画像资料不足，无法生成三个有依据的分镜。'
-    assert.match(await action({ session: fresh }), /画像资料不足/)
-    assert.equal(imageCalls, 3)
 })
