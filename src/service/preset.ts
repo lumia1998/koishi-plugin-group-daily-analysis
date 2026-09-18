@@ -1,21 +1,6 @@
 import type { Context } from 'koishi'
-import type { Config } from '../config'
 import type { TextMessage } from './api'
 import type {} from 'koishi-plugin-chatluna'
-
-export function comicPreset(config: Config): string {
-    switch (config.comic.presetMode) {
-        case 'none':
-            return ''
-        case 'custom':
-            if (!config.comic.preset?.trim()) {
-                throw new Error('请先选择漫画专用 ChatLuna 预设。')
-            }
-            return config.comic.preset
-        default:
-            return config.preset || ''
-    }
-}
 
 /** Resolve on every call so edits/removals in ChatLuna take effect immediately. */
 export async function presetMessages(

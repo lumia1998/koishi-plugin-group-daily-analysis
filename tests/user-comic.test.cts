@@ -6,44 +6,11 @@ import path from 'node:path'
 import { Context } from 'koishi'
 import { Config } from '../src/config'
 import { apply } from '../src/plugins/comic'
-import {
-    buildUserComicPrompt,
-    buildUserComicImagePrompt,
-    defaultUserComicPrompt,
-    formatUserComicStoryboard
-} from '../src/user-comic-prompts'
-import { validateUserComicStoryboard } from '../src/service/validation'
+import { buildUserComicImagePrompt } from '../src/user-comic-prompts'
 import { getUserComicVisualSpec } from '../src/skins/user-comic'
 import { persona } from './theme-fixtures.cts'
 
 test('user comic image prompt keeps the report dimensions and theme direction', () => {
-    const prompt = buildUserComicPrompt(
-        Config({}).comic,
-        persona,
-        true,
-        true,
-        'BlueArchive'
-    )
-    assert.equal(prompt.split(defaultUserComicPrompt).length, 2)
-    for (const text of [
-        '核心人设',
-        '语言风格',
-        '兴趣',
-        '行为特点',
-        '总体概览',
-        '性格特质',
-        '兴趣爱好',
-        '沟通风格',
-        '固定四维',
-        '学院档案',
-        'category',
-        persona.summary,
-        ...persona.evidence
-    ])
-        assert.ok(prompt.includes(text), text)
-    assert.match(prompt, /必须恰好输出 4 格/)
-    assert.match(prompt, /不能覆盖此用户的性格/)
-    assert.match(prompt, /不得虚构价格、链接、成绩/)
     const imagePrompt = buildUserComicImagePrompt(
         Config({}).comic,
         true,
@@ -54,71 +21,11 @@ test('user comic image prompt keeps the report dimensions and theme direction', 
     assert.match(imagePrompt, /附件 2 及后续图片/)
     for (const dimension of ['总体概览', '性格特质', '兴趣爱好', '沟通风格'])
         assert.match(imagePrompt, new RegExp(dimension))
+    assert.match(imagePrompt, /学院档案/)
+    assert.match(imagePrompt, /不得编造画像事实/)
+    assert.match(imagePrompt, /虚构链接、价格、战绩、设备参数/)
     assert.doesNotMatch(imagePrompt, /强制 JSON 分镜契约/)
     assert.doesNotMatch(imagePrompt, /speech|15字内|caption/)
-    const plan = validateUserComicStoryboard({
-        panels: [
-            {
-                category: 'interests',
-                scene: 'interest',
-                speech: '兴趣',
-                caption: '爱好'
-            },
-            {
-                category: 'summary',
-                scene: 'summary',
-                speech: '总结',
-                caption: '用户总结'
-            },
-            {
-                category: 'communicationStyle',
-                scene: 'style',
-                speech: '说话',
-                caption: '沟通风格'
-            },
-            {
-                category: 'keyTraits',
-                scene: 'trait',
-                speech: '特质',
-                caption: '性格特质'
-            }
-        ]
-    })
-    const storyboard = formatUserComicStoryboard(plan, persona)
-    assert.match(storyboard, /Panel 1 — 总体概览: summary/)
-    assert.match(storyboard, /Panel 4 — 沟通风格: style/)
-    assert.throws(
-        () =>
-            validateUserComicStoryboard({
-                panels: [
-                    {
-                        category: 'summary',
-                        scene: 'a',
-                        speech: 'a',
-                        caption: 'a'
-                    },
-                    {
-                        category: 'summary',
-                        scene: 'b',
-                        speech: 'b',
-                        caption: 'b'
-                    },
-                    {
-                        category: 'interests',
-                        scene: 'c',
-                        speech: 'c',
-                        caption: 'c'
-                    },
-                    {
-                        category: 'keyTraits',
-                        scene: 'd',
-                        speech: 'd',
-                        caption: 'd'
-                    }
-                ]
-            }),
-        /恰好覆盖/
-    )
 })
 
 test('all selectable skins resolve to themed user comic direction', () => {
@@ -190,7 +97,6 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
     let saved: any = { profile: persona, username: persona.username }
     const ids: string[] = []
     let imageCalls = 0
-    let textCalls = 0
     const sent: any[] = []
     const config = Config({
         enableAllGroupsByDefault: true,
@@ -263,10 +169,6 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
         chatluna_group_analysis_llm: {
             summarizeTopics() {
                 assert.fail('must not summarize topics')
-            },
-            async generateUserComicStoryboard(prompt: string) {
-                textCalls++
-                assert.fail(`must not request a storyboard: ${prompt}`)
             }
         }
     }
@@ -339,12 +241,10 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
         '该用户还没有已保存的用户画像，请先使用“用户画像”生成普通画像。'
     )
     assert.equal(imageCalls, 0)
-    assert.equal(textCalls, 0)
     saved = { profile: persona, username: persona.username }
     await action({ session })
     assert.equal(ids.at(-1), 'self')
     assert.equal(imageCalls, 1)
-    assert.equal(textCalls, 0)
     assert.ok(sent.some((item) => String(item).includes('<img')))
     assert.match(
         await action(

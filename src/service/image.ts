@@ -74,22 +74,6 @@ export async function loadReferences(
     return loaded
 }
 
-/** 读取 OneBot/QQ 用户头像，供用户画像漫画作为人物参考图使用。 */
-export async function loadQQAvatar(
-    userId: string,
-    signal?: AbortSignal
-): Promise<Buffer> {
-    const url = `https://q1.qlogo.cn/g?b=qq&nk=${encodeURIComponent(userId)}&s=640`
-    const response = await fetch(url, { signal, redirect: 'error' })
-    if (!response.ok)
-        throw new Error(`用户头像下载失败（HTTP ${response.status}）。`)
-    const contentLength = Number(response.headers.get('content-length') || 0)
-    if (contentLength > MAX_IMAGE) throw new Error('用户头像超过 20MB 限制。')
-    const data = Buffer.from(await response.arrayBuffer())
-    imageMime(data)
-    return data
-}
-
 async function decodeImage(item: any, signal: AbortSignal): Promise<Buffer> {
     if (typeof item?.b64_json === 'string') {
         if (item.b64_json.length > MAX_IMAGE * 1.4)

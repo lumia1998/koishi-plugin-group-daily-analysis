@@ -1,7 +1,7 @@
 {
     "name": "koishi-plugin-group-daily-analysis",
     "description": "基于 ChatLuna 的 Koishi 群聊日报、长期用户画像与群聊及用户画像漫画插件",
-    "version": "0.0.1-alpha.12",
+    "version": "0.0.1-alpha.13",
     "type": "module",
     "main": "lib/index.cjs",
     "module": "lib/index.mjs",
@@ -102,7 +102,9 @@
     "scripts": {
         "test": "tsx --test tests/*.test.cts",
         "test:ui": "tsx tests/ui/verify.cts",
-        "build": "npx yakumo build",
+        "clean": "node scripts/clean-build.mjs",
+        "build": "npm run clean && npx yakumo build",
+        "prepack": "npm run build",
         "bump": "npx yakumo version",
         "dep": "npx yakumo upgrade",
         "pub": "npx yakumo publish",

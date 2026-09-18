@@ -47,8 +47,6 @@ export interface Config {
         timeout: number
         cooldown: number
         size: string
-        presetMode: 'inherit' | 'none' | 'custom'
-        preset: string
     }
     enableAllGroupsByDefault: boolean
     listenerGroups: GroupListener[]
@@ -303,27 +301,10 @@ export const Config: Schema<Config> = Schema.intersect([
                 .description(
                     '启用用户画像漫画。读取已有长期画像，不重复执行画像分析。'
                 ),
-            presetMode: Schema.union([
-                Schema.const('inherit').description('继承日报预设'),
-                Schema.const('none').description('不使用预设'),
-                Schema.const('custom').description('指定漫画预设')
-            ])
-                .default('inherit')
-                .description(
-                    '漫画分镜的人格来源。角色描述与参考图仍决定主角外观。'
-                ),
-            preset: Schema.union([
-                Schema.const('').description('未选择'),
-                Schema.dynamic('preset')
-            ])
-                .default('')
-                .description(
-                    '选择“指定漫画预设”时使用。读取 ChatLuna 已导入的预设。'
-                ),
             autoSend: Schema.boolean()
                 .default(false)
                 .description(
-                    '定时群分析报告发送后，同时生成并发送当天群漫画。需要启用漫画功能。'
+                    '定时群分析完成后，异步生成并发送当天群漫画。需要启用漫画功能。'
                 ),
             groupMode: Schema.union([
                 Schema.const('inherit').description('继承分析群组权限'),
@@ -395,7 +376,7 @@ export const Config: Schema<Config> = Schema.intersect([
                 .role('textarea')
                 .default('')
                 .description(
-                    '漫画主角的外观、服装、性格和说话方式。分镜模型不会看到参考图，请在这里描述角色；每格都使用此角色，外观冲突时以参考图为准。'
+                    '漫画主持角色的外观、服装、性格和说话方式。生图模型会同时收到报告图与角色参考图；外观冲突时以角色参考图为准。'
                 ),
             timeout: Schema.number()
                 .min(1)
@@ -408,7 +389,9 @@ export const Config: Schema<Config> = Schema.intersect([
                 .description('每群漫画冷却时间（分钟）。'),
             size: Schema.string()
                 .default('1536x1024')
-                .description('OpenAI Images 尺寸；Google 使用横向 16:9。')
+                .description(
+                    'OpenAI 群漫画尺寸；用户画像漫画固定使用竖版 1024x1536。Google 群漫画使用 16:9，用户画像漫画使用 3:4。'
+                )
         }).description('漫画设置')
     }).description('模型接口与漫画'),
     Schema.object({

@@ -12,10 +12,7 @@ import { LLMService } from '../src/service/llm'
 import { apply, todayWindow } from '../src/plugins/comic'
 import { listModels } from '../src/models'
 import { createTrace, errorKind } from '../src/diagnostics'
-import {
-    buildStoryboardPrompt,
-    buildComicImagePrompt
-} from '../src/comic-prompts'
+import { buildGroupComicImagePrompt } from '../src/comic-prompts'
 
 test('API errors preserve provider details and network codes without credentials', async (t) => {
     t.mock.method(
@@ -49,29 +46,23 @@ test('API errors preserve provider details and network codes without credentials
     )
 })
 
-test('comic prompts inject persona and enforce reference identity without guessing appearance', () => {
+test('group comic image prompt assigns report and character reference roles', () => {
     const config = Config({}).comic
-    const topics = [{ topic: 'test', detail: 'details', contributors: [] }]
-    let prompt = buildStoryboardPrompt(config, topics, true)
-    assert.ok(prompt.includes('不得猜测'))
-    assert.ok(prompt.includes('全部 1 个话题'))
     config.characterDescription = '灰发猫耳，草帽白裙，温柔俏皮'
-    prompt = buildStoryboardPrompt(config, topics, true)
-    assert.ok(prompt.includes(config.characterDescription))
-    assert.ok(prompt.includes('每格都必须出现同一个主角'))
-    const imagePrompt = buildComicImagePrompt(
-        'a black-haired male protagonist',
+    const imagePrompt = buildGroupComicImagePrompt(
         config,
-        true
+        true,
+        true,
+        1,
+        'md3'
     )
-    assert.ok(
-        imagePrompt.includes('MUST be ignored in favor of the reference image')
-    )
+    assert.match(imagePrompt, /附件 1 是完整的群分析报告图片/)
+    assert.match(imagePrompt, /附件 2 及后续图片/)
+    assert.match(imagePrompt, /应有 1 个话题/)
     assert.ok(imagePrompt.includes(config.characterDescription))
-    assert.ok(
-        !buildComicImagePrompt('scene', config, false).includes(
-            'attached image'
-        )
+    assert.match(
+        buildGroupComicImagePrompt(config, true, false, 1),
+        /没有主持角色参考图/
     )
 })
 
@@ -470,9 +461,6 @@ test('comic pipeline uses the group report image and enforces cooldown and group
             async summarizeTopics(text: string) {
                 assert.equal(typeof text, 'string')
                 return [{ topic: 'test', detail: 'topic details' }]
-            },
-            generateGroupComicStoryboard() {
-                assert.fail('群漫画不应再请求文本分镜')
             }
         },
         chatluna_group_analysis_renderer: {

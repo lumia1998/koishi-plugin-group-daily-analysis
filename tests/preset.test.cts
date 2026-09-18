@@ -6,7 +6,7 @@ import {
     SystemMessage
 } from '@langchain/core/messages'
 import { Config } from '../src/config'
-import { presetMessages, comicPreset } from '../src/service/preset'
+import { presetMessages } from '../src/service/preset'
 import { textRequest, type TextFormat } from '../src/service/api'
 import { LLMService } from '../src/service/llm'
 
@@ -119,18 +119,6 @@ test('all text formats preserve system persona, example roles and final task', a
     }
 })
 
-test('comic preset supports inheritance, explicit override and disabling', () => {
-    const config = Config({ preset: 'narrator' })
-    assert.equal(comicPreset(config), 'narrator')
-    config.comic.presetMode = 'none'
-    assert.equal(comicPreset(config), '')
-    config.comic.presetMode = 'custom'
-    assert.throws(() => comicPreset(config), /请先选择/)
-    config.comic.preset = 'artist'
-    assert.equal(comicPreset(config), 'artist')
-    assert.equal(Config({}).preset, '')
-})
-
 test('LLM requests actually include the preset; query parsing and explicit none bypass it', async (t) => {
     const { ctx } = fixture()
     const config = Config({
@@ -168,6 +156,6 @@ test('LLM requests actually include the preset; query parsing and explicit none 
         groupName: '测试群'
     })
     assert.equal(typeof bodies[1].input, 'string')
-    await service.generateText('storyboard', undefined, undefined, '')
-    assert.equal(bodies[2].input, 'storyboard')
+    await service.generateText('task', undefined, undefined, '')
+    assert.equal(bodies[2].input, 'task')
 })

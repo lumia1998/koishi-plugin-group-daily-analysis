@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { Config } from '../src/config'
-import { buildStoryboardPrompt } from '../src/comic-prompts'
-import { buildUserComicPrompt } from '../src/user-comic-prompts'
+import { buildGroupComicImagePrompt } from '../src/comic-prompts'
+import { buildUserComicImagePrompt } from '../src/user-comic-prompts'
 import { LLMService } from '../src/service/llm'
 import { group, persona } from './theme-fixtures.cts'
 
@@ -80,18 +80,18 @@ test('saved prompt overrides are ignored in favor of built-in prompts', async ()
     assert.match(captured[4], /专业的社群观察员/)
     assert.match(captured[5], /结构化查询/)
 
-    const storyboard = buildStoryboardPrompt(
+    const groupComic = buildGroupComicImagePrompt(
         config.comic,
-        [{ topic: '测试话题', detail: '测试内容', contributors: [] }],
-        false
-    )
-    assert.doesNotMatch(storyboard, /LEGACY_CUSTOM/)
-    assert.match(storyboard, /群聊漫画编剧/)
-
-    const userComic = buildUserComicPrompt(
-        config.comic,
-        persona,
+        true,
         false,
+        1
+    )
+    assert.doesNotMatch(groupComic, /LEGACY_CUSTOM/)
+    assert.match(groupComic, /群聊话题观察漫画报告/)
+
+    const userComic = buildUserComicImagePrompt(
+        config.comic,
+        true,
         false,
         'md3'
     )
