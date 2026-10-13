@@ -15,7 +15,7 @@
 - 热门话题、群友称号、金句、聊天质量、活跃排行和 24 小时分布
 - 自动更新和手动查看长期用户画像
 - 群漫画及用户画像四维观察漫画
-- 13 个主题、明暗模式、角色方案和多张角色参考图
+- 13 个主题、明暗模式和主持角色参考图
 - 文本 API 重试、超时、并发限制、Token 统计和分析任务检查点
 - ChatLuna 工具与提示词函数，可读取群消息和已保存画像
 
@@ -58,7 +58,7 @@ npm install koishi-plugin-group-daily-analysis
 
 OpenAI 在有参考图时调用 `images/edits`，无参考图时调用 `images/generations`。Google 会把参考图以内联图片形式发送，并要求模型返回图片。`baseUrl` 可以填写基础地址、版本地址或完整端点，插件会规范化常见路径。
 
-当前漫画没有单独的文本分镜调用，也不使用 ChatLuna 漫画预设。手动群漫画在没有现成话题时仍会调用文本模型提取话题；用户画像漫画只读取已保存画像，不会重新分析聊天记录。
+当前漫画没有单独的文本分镜调用。手动群漫画在没有现成话题时仍会调用文本模型提取话题；用户画像漫画只读取已保存画像，不会重新分析聊天记录。
 
 ## 群分析
 
@@ -153,17 +153,15 @@ data/chatluna/group_analysis/reports
 
 ## 角色和参考图
 
-可以使用全局 `referenceImage`、`referenceImages` 和 `characterDescription`，也可以在 `characters` 中配置多套角色方案。
+通过 `comic.referenceImage` 配置一张主持角色参考图，群漫画和用户画像漫画共用此图。
 
-- 存在启用的角色方案时，优先使用角色方案的描述和图片。
-- 角色方案没有图片时，会回退到全局多图 `referenceImages`。
-- `randomCharacterDaily` 开启后，同一机器人在同一天稳定使用同一个角色方案。
-- 每张参考图必须是 PNG、JPEG 或 WebP，最大 20 MB。
+- 参考图必须是 PNG、JPEG 或 WebP，最大 20 MB。
+- 留空时由生图模型设计统一的主持角色，并在各分镜中保持一致。
 - 角色参考图只定义主持角色外观，报告图片提供话题或画像事实。
 
-## ChatLuna 预设、工具与提示词函数
+## ChatLuna 工具与提示词函数
 
-`preset` 只影响文本分析任务，包括话题、称号、金句、聊天质量、用户画像和分析后的对话回复。自然语言查询解析会绕过预设，漫画生图也不会使用预设。
+文本分析、查询解析和分析后的回复直接使用插件内置提示词。ChatLuna 预设注入功能及 `preset` 配置已移除。
 
 插件向 ChatLuna 注册：
 
@@ -172,7 +170,7 @@ data/chatluna/group_analysis/reports
 - 提示词函数 `group_message_fetch(...)`。
 - 提示词函数 `group_user_persona(...)`。
 
-分析提示词和漫画生图提示词由源码内置。配置中遗留的旧版自定义提示词字段不会改变当前运行提示词。
+分析提示词和漫画生图提示词由源码内置。旧版自定义提示词字段已从配置 Schema 中删除，配置文件中残留的旧值可直接移除，不会改变当前运行提示词。
 
 ## 常用配置
 
@@ -182,7 +180,7 @@ data/chatluna/group_analysis/reports
 | 消息存储设置 | 强制落库与保留天数 |
 | 群分析设置 | 消息上下限、活跃用户数量、并发和检查点 |
 | 分析渲染设置 | 输出格式、主题、皮肤和 OneBot 归档 |
-| ChatLuna 预设 | 文本分析的人格和表达上下文 |
+| 文本生成设置 | Google 文本接口的生成随机度 |
 | 模型接口与漫画 | 文本接口、生图接口、漫画权限、角色和冷却 |
 | 用户画像设置 | 自动更新阈值、缓存、回溯和消息数量 |
 
@@ -243,7 +241,7 @@ data/chatluna/group_analysis/reports
 
 ## 从旧版本升级
 
-当前版本不再使用漫画 JSON 分镜、漫画专用 ChatLuna 预设和增量分析。旧配置中的 `comic.presetMode`、`comic.preset` 以及旧版自定义提示词字段可能仍留在配置文件中，但运行时会忽略。
+当前版本已移除漫画 JSON 分镜、ChatLuna 预设注入和增量分析。旧提示词字段及重复默认文本、顶层 `preset` 配置与分组、旧漫画预设显示标签均已删除。配置文件中残留的 `preset`、`comic.presetMode`、`comic.preset`、旧版自定义提示词及分模块模型字段均不生效，可直接移除；具体字段见 [MIGRATION_PLAN.md](./MIGRATION_PLAN.md)。
 
 升级前建议备份 Koishi 配置和数据库。接口格式与数据库迁移说明见 [MIGRATION_PLAN.md](./MIGRATION_PLAN.md)。
 

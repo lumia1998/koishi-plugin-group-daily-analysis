@@ -47,23 +47,14 @@ test('API errors preserve provider details and network codes without credentials
 })
 
 test('group comic image prompt assigns report and character reference roles', () => {
-    const config = Config({}).comic
-    config.characterDescription = '灰发猫耳，草帽白裙，温柔俏皮'
-    const imagePrompt = buildGroupComicImagePrompt(
-        config,
-        true,
-        true,
-        1,
-        'md3'
-    )
+    const imagePrompt = buildGroupComicImagePrompt(true, true, 1, 'md3')
     assert.match(imagePrompt, /附件 1 是完整的群分析报告图片/)
-    assert.match(imagePrompt, /附件 2 及后续图片/)
+    assert.match(imagePrompt, /附件 2 是配置页中的主要主持角色参考图/)
     assert.match(imagePrompt, /应有 1 个话题/)
-    assert.ok(imagePrompt.includes(config.characterDescription))
-    assert.match(
-        buildGroupComicImagePrompt(config, true, false, 1),
-        /没有主持角色参考图/
-    )
+    assert.doesNotMatch(imagePrompt, /额外设定|及后续/)
+    const withoutCharacter = buildGroupComicImagePrompt(true, false, 1)
+    assert.match(withoutCharacter, /没有主持角色参考图/)
+    assert.doesNotMatch(withoutCharacter, /附件 2/)
 })
 
 const png = Buffer.from(
@@ -80,7 +71,18 @@ test('schema supplies nested API and disabled-comic defaults', () => {
     const config = Config({})
     assert.equal(config.llm.format, 'openai')
     assert.equal(config.llm.timeout, 120)
+    assert.equal((config as any).preset, undefined)
+    assert.ok(!JSON.stringify(Config).includes('"preset"'))
     assert.equal(config.comic.enabled, false)
+    for (const key of [
+        'referenceImages',
+        'characters',
+        'randomCharacterDaily',
+        'characterDescription'
+    ]) {
+        assert.equal((config.comic as any)[key], undefined, key)
+        assert.ok(!JSON.stringify(Config).includes(`"${key}"`), key)
+    }
     assert.equal(config.comic.maxTopics, undefined)
     assert.equal(config.maxConcurrentTasks, 3)
     assert.equal(config.maxConcurrentLLM, 4)
@@ -393,6 +395,94 @@ test('LLM service parses plain JSON and fenced YAML without ChatLuna', async (t)
     }
 })
 
+test('text analysis and replies ignore saved presets in every provider format', async (t) => {
+    for (const format of ['openai', 'anthropic', 'google'] as const) {
+        const config = Config({ llm: { format, baseUrl: base, model: 'text' } })
+        Object.assign(config, { preset: 'REMOVED_PRESET_MUST_NOT_RUN' })
+        const ctx = {
+            get chatluna() {
+                assert.fail('text generation must not access ChatLuna presets')
+            },
+            logger: { info() {}, warn() {}, error() {} }
+        }
+        const service = Object.assign(Object.create(LLMService.prototype), {
+            config,
+            ctx
+        }) as LLMService
+        const prompts: string[] = []
+        let output = '[{"topic":"test","contributors":[],"detail":"details"}]'
+        t.mock.method(globalThis, 'fetch', async (_url, init) => {
+            const body = JSON.parse(init!.body as string)
+            let prompt: string
+            if (format === 'openai') {
+                assert.equal(typeof body.input, 'string')
+                prompt = body.input
+            } else if (format === 'anthropic') {
+                assert.equal(body.system, undefined)
+                assert.equal(body.messages.length, 1)
+                assert.equal(body.messages[0].role, 'user')
+                prompt = body.messages[0].content
+            } else {
+                assert.equal(body.systemInstruction, undefined)
+                assert.equal(body.contents.length, 1)
+                assert.equal(body.contents[0].role, 'user')
+                assert.equal(body.contents[0].parts.length, 1)
+                prompt = body.contents[0].parts[0].text
+            }
+            assert.doesNotMatch(prompt, /REMOVED_PRESET_MUST_NOT_RUN/)
+            prompts.push(prompt)
+            if (format === 'openai')
+                return json({
+                    output: [
+                        {
+                            type: 'message',
+                            content: [{ type: 'output_text', text: output }]
+                        }
+                    ]
+                })
+            if (format === 'anthropic')
+                return json({ content: [{ type: 'text', text: output }] })
+            return json({
+                candidates: [{ content: { parts: [{ text: output }] } }]
+            })
+        })
+        assert.equal(
+            (await service.summarizeTopics('messages'))[0].topic,
+            'test'
+        )
+        output = '{"action":"只分析"}'
+        assert.equal(
+            (
+                await service.parseGroupQuery({
+                    query: '今天聊了什么',
+                    currentTime: '2026-10-13 12:00:00',
+                    timeZone: 'Asia/Singapore',
+                    platform: 'onebot',
+                    groupName: '测试群'
+                })
+            )?.action,
+            '只分析'
+        )
+        output = 'reply'
+        assert.equal(
+            await service.replyGroupQuery({
+                query: '你怎么看',
+                analysisResult: '分析结果',
+                currentTime: '2026-10-13 12:00:00',
+                groupName: '测试群'
+            }),
+            'reply'
+        )
+        assert.equal(await service.generateText('direct task'), 'reply')
+        assert.equal(prompts.length, 4)
+        assert.match(prompts[0], /群聊信息总结/)
+        assert.match(prompts[1], /结构化查询/)
+        assert.match(prompts[2], /群聊分析对话助手/)
+        assert.equal(prompts[3], 'direct task')
+        t.mock.restoreAll()
+    }
+})
+
 test('comic pipeline uses the group report image and enforces cooldown and group guards', async (t) => {
     const config = Config({
         enableAllGroupsByDefault: true,
@@ -478,6 +568,7 @@ test('comic pipeline uses the group report image and enforces cooldown and group
             /查看附件 1 的今日话题部分/
         )
         assert.doesNotMatch(body.contents[0].parts[0].text, /JSON|storyboard/)
+        assert.equal(body.contents[0].parts.length, 2)
         assert.equal(
             body.contents[0].parts[1].inlineData.data,
             png.toString('base64')

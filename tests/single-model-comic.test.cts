@@ -11,18 +11,12 @@ test('analysis and comic minimum defaults to 50 and accepts custom counts', () =
 })
 
 test('group comic image prompt reads the complete report and keeps one panel per topic', () => {
-    const prompt = buildGroupComicImagePrompt(
-        Config({}).comic,
-        true,
-        true,
-        2,
-        'BlueArchive'
-    )
+    const prompt = buildGroupComicImagePrompt(true, true, 2, 'BlueArchive')
     assert.match(prompt, /完整的群分析报告图片/)
     assert.match(prompt, /查看附件 1 的今日话题部分/)
     assert.match(prompt, /每个话题分别创作一个独立分镜/)
     assert.match(prompt, /当前报告中应有 2 个话题/)
-    assert.match(prompt, /附件 2 及后续图片是配置页中的主要主持角色参考图/)
+    assert.match(prompt, /附件 2 是配置页中的主要主持角色参考图/)
     assert.doesNotMatch(prompt, /JSON|storyboard|speech|caption/)
 })
 

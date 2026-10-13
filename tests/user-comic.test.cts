@@ -11,14 +11,9 @@ import { getUserComicVisualSpec } from '../src/skins/user-comic'
 import { persona } from './theme-fixtures.cts'
 
 test('user comic image prompt keeps the report dimensions and theme direction', () => {
-    const imagePrompt = buildUserComicImagePrompt(
-        Config({}).comic,
-        true,
-        true,
-        'BlueArchive'
-    )
+    const imagePrompt = buildUserComicImagePrompt(true, true, 'BlueArchive')
     assert.match(imagePrompt, /附件 1 是用户画像报告/)
-    assert.match(imagePrompt, /附件 2 及后续图片/)
+    assert.match(imagePrompt, /附件 2 是配置页中的主要主持角色参考图/)
     for (const dimension of ['总体概览', '性格特质', '兴趣爱好', '沟通风格'])
         assert.match(imagePrompt, new RegExp(dimension))
     assert.match(imagePrompt, /学院档案/)
@@ -26,6 +21,10 @@ test('user comic image prompt keeps the report dimensions and theme direction', 
     assert.match(imagePrompt, /虚构链接、价格、战绩、设备参数/)
     assert.doesNotMatch(imagePrompt, /强制 JSON 分镜契约/)
     assert.doesNotMatch(imagePrompt, /speech|15字内|caption/)
+    assert.doesNotMatch(imagePrompt, /额外设定|及后续/)
+    const withoutCharacter = buildUserComicImagePrompt(true, false)
+    assert.match(withoutCharacter, /另行设计统一的主持角色/)
+    assert.doesNotMatch(withoutCharacter, /附件 2/)
 })
 
 test('all selectable skins resolve to themed user comic direction', () => {
@@ -107,6 +106,18 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
             model: 'image',
             format: 'google'
         }
+    })
+    Object.assign(config.comic, {
+        referenceImages: ['removed-reference-must-not-be-loaded.png'],
+        characters: [
+            {
+                enabled: true,
+                description: 'REMOVED_CHARACTER_SETTING',
+                referenceImages: ['removed-character-must-not-be-loaded.png']
+            }
+        ],
+        randomCharacterDaily: true,
+        characterDescription: 'REMOVED_CHARACTER_SETTING'
     })
     let started!: () => void
     let releaseFetch!: () => void
@@ -195,8 +206,9 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
             assert.match(body.contents[0].parts[0].text, new RegExp(dimension))
         assert.doesNotMatch(
             body.contents[0].parts[0].text,
-            /JSON|speech|15字内/
+            /JSON|speech|15字内|REMOVED_CHARACTER_SETTING/
         )
+        assert.equal(body.contents[0].parts.length, 3)
         assert.equal(body.generationConfig.imageConfig.aspectRatio, '3:4')
         assert.equal(
             body.contents[0].parts[1].inlineData.data,

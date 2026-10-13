@@ -16,16 +16,10 @@ import {
     matchesGroupList,
     shouldListenToMessage
 } from '../utils'
-import {
-    generateImage,
-    imageMime,
-    loadReference,
-    loadReferences
-} from '../service/image'
+import { generateImage, imageMime, loadReference } from '../service/image'
 import { createTrace, errorDetail, errorKind } from '../diagnostics'
 import { buildGroupComicImagePrompt } from '../comic-prompts'
 import { ConcurrencyLimiter } from '../service/limiter'
-import { createHash } from 'node:crypto'
 
 export const inject = [
     'chatluna_group_analysis_message',
@@ -97,7 +91,6 @@ export function apply(ctx: Context, config: Config) {
     const trace = createTrace(ctx, !!config.debug, '群漫画')
     const running = new Map<string, AbortController>()
     const lastRun = new Map<string, number>()
-    const dailyCharacters = new Map<string, { day: string; index: number }>()
     const imageLimiter = new ConcurrencyLimiter(config.maxConcurrentTasks || 3)
     ctx.on('dispose', () => {
         for (const controller of running.values()) controller.abort()
@@ -149,40 +142,6 @@ export function apply(ctx: Context, config: Config) {
             if (dimensions < 3)
                 return '画像资料不足，无法生成四维观察报告。请先积累更多画像信息。'
         }
-        const enabledCharacters = (config.comic.characters || []).filter(
-            (item) => item.enabled
-        )
-        const now = new Date()
-        const day = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
-        const characterKey = `${session.platform}:${session.selfId}`
-        let selected = enabledCharacters[0]
-        if (enabledCharacters.length) {
-            let choice = dailyCharacters.get(characterKey)
-            if (!choice || choice.day !== day) {
-                choice = {
-                    day,
-                    index: config.comic.randomCharacterDaily
-                        ? createHash('sha256')
-                              .update(`${characterKey}:${day}`)
-                              .digest()
-                              .readUInt32BE(0) % enabledCharacters.length
-                        : 0
-                }
-                dailyCharacters.set(characterKey, choice)
-            }
-            selected =
-                enabledCharacters[choice.index % enabledCharacters.length]
-        }
-        const comicConfig = selected
-            ? {
-                  ...config.comic,
-                  characterDescription:
-                      selected.description || config.comic.characterDescription,
-                  referenceImages: selected.referenceImages?.length
-                      ? selected.referenceImages
-                      : config.comic.referenceImages
-              }
-            : config.comic
         const key = [
             session.platform,
             session.selfId,
@@ -202,16 +161,12 @@ export function apply(ctx: Context, config: Config) {
         running.set(key, controller)
         try {
             const primaryReference = await loadReference(
-                selected ? '' : config.comic.referenceImage,
-                ctx.baseDir
-            )
-            const extraReferences = await loadReferences(
-                comicConfig.referenceImages,
+                config.comic.referenceImage,
                 ctx.baseDir
             )
             const characterReferences = primaryReference
-                ? [primaryReference, ...extraReferences]
-                : extraReferences
+                ? [primaryReference]
+                : []
             let reportReference: Buffer | undefined
             if (profile) {
                 stage = '渲染画像参考图'
@@ -325,7 +280,6 @@ export function apply(ctx: Context, config: Config) {
             let imagePrompt: string
             if (profile) {
                 imagePrompt = buildUserComicImagePrompt(
-                    comicConfig,
                     !!reportReference,
                     characterReferences.length > 0,
                     config.skin
@@ -336,7 +290,6 @@ export function apply(ctx: Context, config: Config) {
                 })
             } else {
                 imagePrompt = buildGroupComicImagePrompt(
-                    comicConfig,
                     !!reportReference,
                     characterReferences.length > 0,
                     groupTopics.length,
@@ -352,7 +305,7 @@ export function apply(ctx: Context, config: Config) {
             stage = '调用生图 API'
             const image = await imageLimiter.run(() =>
                 generateImage(
-                    comicConfig,
+                    config.comic,
                     imagePrompt,
                     comicReferences,
                     controller.signal,

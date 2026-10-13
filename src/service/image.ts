@@ -62,18 +62,6 @@ export async function loadReference(
     return data
 }
 
-export async function loadReferences(
-    paths: string[] | undefined,
-    baseDir: string
-): Promise<Buffer[]> {
-    const loaded: Buffer[] = []
-    for (const file of paths || []) {
-        const data = await loadReference(file, baseDir)
-        if (data) loaded.push(data)
-    }
-    return loaded
-}
-
 async function decodeImage(item: any, signal: AbortSignal): Promise<Buffer> {
     if (typeof item?.b64_json === 'string') {
         if (item.b64_json.length > MAX_IMAGE * 1.4)

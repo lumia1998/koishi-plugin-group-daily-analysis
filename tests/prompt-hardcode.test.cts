@@ -9,6 +9,19 @@ import { group, persona } from './theme-fixtures.cts'
 test('saved prompt overrides are ignored in favor of built-in prompts', async () => {
     const sentinel = 'LEGACY_CUSTOM_PROMPT_MUST_NOT_RUN'
     const config: any = Config({})
+    const schema = JSON.stringify(Config)
+    for (const key of [
+        'promptTopic',
+        'promptUserTitles',
+        'promptGoldenQuotes',
+        'promptUserPersona',
+        'promptChatQuality',
+        'promptQueryParser',
+        'promptQueryChat'
+    ]) {
+        assert.ok(!schema.includes(`"${key}"`), key)
+        assert.equal(config[key], undefined, key)
+    }
     Object.assign(config, {
         promptTopic: sentinel,
         promptUserTitles: sentinel,
@@ -80,21 +93,11 @@ test('saved prompt overrides are ignored in favor of built-in prompts', async ()
     assert.match(captured[4], /专业的社群观察员/)
     assert.match(captured[5], /结构化查询/)
 
-    const groupComic = buildGroupComicImagePrompt(
-        config.comic,
-        true,
-        false,
-        1
-    )
+    const groupComic = buildGroupComicImagePrompt(true, false, 1)
     assert.doesNotMatch(groupComic, /LEGACY_CUSTOM/)
     assert.match(groupComic, /群聊话题观察漫画报告/)
 
-    const userComic = buildUserComicImagePrompt(
-        config.comic,
-        true,
-        false,
-        'md3'
-    )
+    const userComic = buildUserComicImagePrompt(true, false, 'md3')
     assert.doesNotMatch(userComic, /LEGACY_CUSTOM/)
     assert.match(userComic, /四维人物观察报告/)
 })

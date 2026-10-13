@@ -1,11 +1,9 @@
-import type { Config } from './config'
 import {
     getUserComicVisualSpec,
     type UserComicVisualSpec
 } from './skins/user-comic'
 
 export function buildUserComicImagePrompt(
-    config: Config['comic'],
     hasReportReference: boolean,
     hasCharacterReference: boolean,
     skin = 'md3'
@@ -13,7 +11,7 @@ export function buildUserComicImagePrompt(
     const visual = getUserComicVisualSpec(skin)
     const referenceRoles = hasReportReference
         ? hasCharacterReference
-            ? '附件 1 是用户画像报告截图（当前主题的报告版式），附件 2 及后续图片是配置页中的主要主持角色参考图。图 1 左上角头像是被分析对象，图 2 及后续角色才是主持人；两种人物绝不能混淆、合并或互换。'
+            ? '附件 1 是用户画像报告截图（当前主题的报告版式），附件 2 是配置页中的主要主持角色参考图。图 1 左上角头像是被分析对象，图 2 的角色才是主持人；两种人物绝不能混淆、合并或互换。'
             : '附件 1 是当前主题的用户画像报告截图，其中左上角头像是被分析对象；请另行设计统一的主持角色，不要把头像直接改造成主持角色。'
         : hasCharacterReference
           ? '当前没有成功生成用户画像报告截图；附件是主持角色的外观参考，不得把主持角色当成画像本人。'
@@ -28,7 +26,6 @@ ${referenceRoles}
 主持角色要在四个分镜中逐格观察、吐槽和讲解图 1 左上角头像人物的性格；吐槽友善、有趣，但必须以图 1 的实际内容为依据，不得编造画像事实。
 四格保持同一主持角色的脸、发型、服装、颜色和配饰。报告中的头像是被分析对象，配置的主要角色参考图是吐槽者。
 只需要输出最终图片，不要输出结构化数据、Markdown、分镜说明或幕后分析文字。图片内可以有清晰的中文标题、标签、对白和报告式短句，但不要塞入大段聊天记录、虚构链接、价格、战绩、设备参数或伪造原话。
-主要主持角色的额外设定：${config.characterDescription?.trim() || '以附件 2 及后续主要角色参考图为准，保持角色外观一致。'}
 请保证四个维度都出现且各自独立成格，整体看起来像一份有角色吐槽的用户画像报告。`
 }
 

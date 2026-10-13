@@ -1,5 +1,15 @@
 # 配置与数据库迁移
 
+## 配置字段清理
+
+- 从配置 Schema 删除七个已由内置提示词替代的字段及其重复默认文本：`promptTopic`、`promptUserTitles`、`promptGoldenQuotes`、`promptUserPersona`、`promptChatQuality`、`promptQueryParser`、`promptQueryChat`。文本分析继续使用 `src/analysis-prompts.ts`，无需重新配置提示词。
+- 删除旧漫画预设来源的显示标签。配置文件中残留的 `comic.presetMode`、`comic.preset`、`comic.prompt` 和 `comic.userPrompt` 均可移除。
+- 删除顶层 `preset` 配置、整个“ChatLuna 预设”配置组、预设读取与消息注入服务，以及文本接口中仅供注入使用的消息分支。所有文本任务直接使用内置提示词；旧配置中的 `preset` 可移除，残留值也不会读取。ChatLuna 消息工具和提示词函数继续保留。
+- 删除 `comic.referenceImages`、`comic.characters`、`comic.randomCharacterDaily`、`comic.characterDescription` 及其角色选择、多图加载和设定注入逻辑。仅保留单张角色参考图 `comic.referenceImage`，群漫画和用户画像漫画共用；留空时由生图模型设计角色。旧配置中的四项可直接移除；若以前仅在角色方案或多图列表中放置图片，可自行选择一张填入 `comic.referenceImage`。
+- 旧分模块模型字段 `llm.topicModel`、`llm.titleModel`、`llm.goldenQuoteModel`、`llm.qualityModel`、`llm.personaModel`、`llm.queryModel`、`llm.chatModel` 和 `llm.comicModel` 不再使用，均可移除。文本任务使用 `llm.model`，生图使用 `comic.model`。
+- 仍有用途的条件配置继续保留：`temperature` 只作用于 Google 文本接口，`comic.size` 只控制 OpenAI 群漫画。配置说明补充单张角色参考图、自动漫画触发范围及并发限制。
+- 本次清理不需要数据库迁移。旧配置残留值不再读取；插件不会自动修改 Koishi 配置文件或把旧角色图片迁移到单图配置。
+
 ## 主题配对与用户画像漫画
 
 - 原有 13 个皮肤标识保持兼容。群日报沿用原来的基础模板和映射；新增八个映射主题专用的用户档案模板。

@@ -13,7 +13,6 @@ import {
 import { extractText, requestJson, textRequest } from './api'
 import { load } from 'js-yaml'
 import { createTrace } from '../diagnostics'
-import { presetMessages } from './preset'
 import { ConcurrencyLimiter } from './limiter'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { validateAnalysisOutput } from './validation'
@@ -55,23 +54,13 @@ export class LLMService extends Service {
     public async generateText(
         prompt: string,
         modelName?: string,
-        signal?: AbortSignal,
-        presetName = this.config.preset || ''
+        signal?: AbortSignal
     ): Promise<string> {
         const model = modelName || this.config.llm.model
         const api = this.config.llm
         if (!api?.baseUrl || !model)
             throw new Error('请配置自定义 LLM API 地址和模型。')
-        const messages = presetName
-            ? await presetMessages(this.ctx, presetName, prompt)
-            : undefined
-        const request = textRequest(
-            api,
-            model,
-            prompt,
-            this.config.temperature,
-            messages
-        )
+        const request = textRequest(api, model, prompt, this.config.temperature)
         const trace = createTrace(this.ctx, !!this.config.debug, '文本 API')
         trace('开始生成', {
             format: api.format,
@@ -173,17 +162,11 @@ export class LLMService extends Service {
         prompt: string,
         taskName: string,
         modelName?: string,
-        signal?: AbortSignal,
-        presetName = this.config.preset || ''
+        signal?: AbortSignal
     ): Promise<T> {
         const attempts = Math.max(0, this.config.llm.retryCount ?? 2)
         for (let attempt = 0; ; attempt++) {
-            const text = await this.generateText(
-                prompt,
-                modelName,
-                signal,
-                presetName
-            )
+            const text = await this.generateText(prompt, modelName, signal)
             const fenced = text.match(
                 /\x60\x60\x60(?:json|ya?ml)\s*([\s\S]*?)\x60\x60\x60/i
             )
@@ -432,10 +415,7 @@ export class LLMService extends Service {
         try {
             const intent = await this._callLLM<QueryIntent>(
                 prompt,
-                '群分析请求解析',
-                undefined,
-                undefined,
-                ''
+                '群分析请求解析'
             )
             if (!intent || typeof intent !== 'object') return null
             return {

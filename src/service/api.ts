@@ -13,11 +13,6 @@ export interface ApiConfig {
     retryBackoffSeconds?: number
 }
 
-export interface TextMessage {
-    role: 'system' | 'user' | 'assistant'
-    content: string
-}
-
 // Accept either a versioned API base or a full endpoint; never append /v1 twice.
 export function endpoint(base: string, path: string): string {
     const url = new URL(base)
@@ -148,18 +143,9 @@ export function textRequest(
     config: ApiConfig,
     model: string,
     prompt: string,
-    temperature: number,
-    messages?: TextMessage[]
+    temperature: number
 ) {
     const common = { model }
-    const conversation = messages || [
-        { role: 'user' as const, content: prompt }
-    ]
-    const system = conversation
-        .filter((m) => m.role === 'system')
-        .map((m) => m.content)
-        .join('\n\n')
-    const turns = conversation.filter((m) => m.role !== 'system')
     switch (config.format) {
         case 'openai':
             return {
@@ -167,7 +153,7 @@ export function textRequest(
                 headers: {},
                 body: {
                     ...common,
-                    input: messages ? conversation : prompt,
+                    input: prompt,
                     max_output_tokens: config.maxOutputTokens,
                     store: false
                 }
@@ -182,8 +168,7 @@ export function textRequest(
                 body: {
                     ...common,
                     max_tokens: config.maxOutputTokens,
-                    ...(system ? { system } : {}),
-                    messages: turns
+                    messages: [{ role: 'user', content: prompt }]
                 }
             }
         case 'google':
@@ -194,13 +179,7 @@ export function textRequest(
                 ),
                 headers: { 'x-goog-api-key': config.apiKey },
                 body: {
-                    ...(system
-                        ? { systemInstruction: { parts: [{ text: system }] } }
-                        : {}),
-                    contents: turns.map((m) => ({
-                        role: m.role === 'assistant' ? 'model' : 'user',
-                        parts: [{ text: m.content }]
-                    })),
+                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
                     generationConfig: {
                         maxOutputTokens: config.maxOutputTokens,
                         temperature
