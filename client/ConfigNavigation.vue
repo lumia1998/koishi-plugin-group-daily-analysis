@@ -90,7 +90,7 @@ function updateLayout() {
     view.classList.toggle('group-analysis-navigation-wide', !nextCompact)
     const bounds = view.getBoundingClientRect()
     position.value = {
-        '--navigation-left': `${nextCompact ? bounds.left + 16 : content.getBoundingClientRect().left + 24}px`,
+        '--navigation-left': `${bounds.left}px`,
         '--navigation-top': `${bounds.top + bounds.height / 2}px`,
         '--navigation-max-height': `${Math.max(0, bounds.height - 96)}px`
     }

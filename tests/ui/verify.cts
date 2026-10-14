@@ -58,6 +58,20 @@ async function main() {
         await page.setViewport({ width: 1440, height: 1000 })
         await page.goto(`${server.resolvedUrls.local[0]}tests/ui/index.html`)
         async function assertCentered() {
+            await page.waitForFunction(() => {
+                const nav = document
+                    .querySelector('.group-analysis-navigation')!
+                    .getBoundingClientRect()
+                const panel = document
+                    .querySelector('.plugin-view')!
+                    .getBoundingClientRect()
+                return (
+                    Math.abs(nav.left - panel.left) < 1 &&
+                    Math.abs(
+                        nav.top + nav.height / 2 - panel.top - panel.height / 2
+                    ) < 1
+                )
+            })
             const bounds = await page.$eval(
                 '.group-analysis-navigation',
                 (node: Element) => {
@@ -66,6 +80,8 @@ async function main() {
                         .querySelector('.plugin-view')!
                         .getBoundingClientRect()
                     return {
+                        left: nav.left,
+                        panelLeft: panel.left,
                         center: nav.top + nav.height / 2,
                         panelCenter: panel.top + panel.height / 2,
                         top: nav.top,
@@ -75,6 +91,7 @@ async function main() {
                     }
                 }
             )
+            assert.ok(Math.abs(bounds.left - bounds.panelLeft) < 1)
             assert.ok(Math.abs(bounds.center - bounds.panelCenter) < 1)
             assert.ok(bounds.top >= bounds.panelTop)
             assert.ok(bounds.bottom <= bounds.panelBottom)
@@ -109,7 +126,7 @@ async function main() {
                 }
             }
         )
-        assert.ok(desktopPosition.left > desktopPosition.panelLeft)
+        assert.equal(desktopPosition.left, desktopPosition.panelLeft)
         assert.ok(desktopPosition.right < desktopPosition.formLeft)
         assert.ok(desktopPosition.top > desktopPosition.panelTop)
         await assertCentered()
@@ -231,6 +248,27 @@ async function main() {
             document.documentElement.classList.add('dark')
         )
         await page.screenshot({ path: 'artifacts/navigation/dark.png' })
+        await page.evaluate(() =>
+            document.documentElement.classList.remove('dark')
+        )
+        for (const width of [1920, 2560]) {
+            await page.setViewport({ width, height: 1080 })
+            await assertCentered()
+            assert.ok(
+                await page.$eval(
+                    '.group-analysis-navigation',
+                    (node: Element) =>
+                        node.getBoundingClientRect().right <
+                        document
+                            .querySelector('.k-schema-left')!
+                            .getBoundingClientRect().left
+                )
+            )
+            if (width === 1920)
+                await page.screenshot({
+                    path: 'artifacts/navigation/desktop-wide.png'
+                })
+        }
         await page.setViewport({ width: 1280, height: 1000 })
         await page.waitForFunction(() =>
             document
@@ -281,7 +319,7 @@ async function main() {
                 return { left: bounds.left, right: bounds.right }
             }
         )
-        assert.equal(mobilePosition.left, 16)
+        assert.equal(mobilePosition.left, 0)
         assert.ok(mobilePosition.right < 390 / 2 + 16)
         await assertCentered()
         await page.click('.navigation-toggle')
@@ -299,7 +337,7 @@ async function main() {
         await assertCentered()
         assert.deepEqual(errors, [])
         console.log(
-            `UI passed: ${headings.length} actual schema sections, left panel centering, click/scroll highlight, dynamic sections, plugin isolation, cleanup, resize, desktop/dark/mobile/short screen. Screenshots: ${path.resolve('artifacts/navigation')}`
+            `UI passed: ${headings.length} actual schema sections, flush left panel edge and vertical centering, click/scroll highlight, dynamic sections, plugin isolation, cleanup, resize, desktop/wide/dark/mobile/short screen. Screenshots: ${path.resolve('artifacts/navigation')}`
         )
         await verifyReports(browser)
     } finally {
