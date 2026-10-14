@@ -293,6 +293,33 @@ export function renderTemplate(
     })
 }
 
+export function matchesListenerGroup(
+    session: {
+        guildId?: string
+        channelId?: string
+        platform: string
+        selfId: string
+    },
+    listener: Pick<
+        GroupListener,
+        'platform' | 'selfId' | 'channelId' | 'guildId'
+    >
+): boolean {
+    if (
+        listener.platform !== session.platform ||
+        listener.selfId !== session.selfId
+    )
+        return false
+    return (
+        (!!listener.channelId &&
+            !!session.channelId &&
+            listener.channelId === session.channelId) ||
+        (!!listener.guildId &&
+            !!session.guildId &&
+            listener.guildId === session.guildId)
+    )
+}
+
 export function shouldListenToMessage(
     session: {
         guildId?: string
@@ -312,26 +339,26 @@ export function shouldListenToMessage(
     if (!session.guildId && !session.channelId) return false
     if (enableAllGroupsByDefault) return true
 
-    return listenerGroups.some((listener) => {
-        if (
-            !listener.enabled ||
-            listener.platform !== session.platform ||
-            listener.selfId !== session.selfId
-        ) {
-            return false
-        }
+    return listenerGroups.some(
+        (listener) =>
+            listener.enabled && matchesListenerGroup(session, listener)
+    )
+}
 
-        const channelMatches =
-            !!listener.channelId &&
-            !!session.channelId &&
-            listener.channelId === session.channelId
-        const guildMatches =
-            !!listener.guildId &&
-            !!session.guildId &&
-            listener.guildId === session.guildId
-
-        return channelMatches || guildMatches
-    })
+export function isGroupComicEnabled(
+    session: {
+        guildId?: string
+        channelId?: string
+        platform: string
+        selfId: string
+    },
+    listenerGroups: Config['listenerGroups'] = []
+): boolean {
+    return !listenerGroups.some(
+        (listener) =>
+            listener.comicEnabled === false &&
+            matchesListenerGroup(session, listener)
+    )
 }
 
 export function inferPlatformInfo(

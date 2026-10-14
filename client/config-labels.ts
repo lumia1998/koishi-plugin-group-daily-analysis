@@ -8,6 +8,7 @@ export const configLabels: Record<string, string> = {
     channelId: '频道编号',
     guildId: '群组编号',
     enabled: '启用',
+    comicEnabled: '启用群漫画',
     autoAnalysisGroupMode: '定时分析群组范围',
     autoAnalysisGroups: '定时分析群组列表',
     cronSchedule: '定时计划',

@@ -13,6 +13,7 @@ import {
 import {
     calculateBasicStats,
     getAvatarUrl,
+    isGroupComicEnabled,
     matchesGroupList,
     shouldListenToMessage
 } from '../utils'
@@ -130,6 +131,8 @@ export function apply(ctx: Context, config: Config) {
             )
         )
             return '本群未开放群漫画功能。'
+        if (!profile && !isGroupComicEnabled(session, config.listenerGroups))
+            return '本群已关闭群漫画，请在“监听群组”中开启“启用群漫画”。'
         if (!config.comic.baseUrl || !config.comic.model)
             return '请配置生图 API 地址和模型。'
         if (profile) {
@@ -443,6 +446,7 @@ export function apply(ctx: Context, config: Config) {
             autoSend: !!config.comic?.autoSend
         })
         if (!config.comic?.enabled || !config.comic.autoSend) return
+        if (!isGroupComicEnabled(group, config.listenerGroups)) return
         if (topics !== undefined && !topics.some((item) => item?.topic?.trim()))
             return
         const bot = ctx.bots.find(

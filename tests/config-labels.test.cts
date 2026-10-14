@@ -14,6 +14,7 @@ test('all schema property keys have Chinese display titles without renaming save
         if (schema.inner) visit(schema.inner)
     }
     visit(Config)
+    assert.equal(configLabels.comicEnabled, '启用群漫画')
     const config = Config({})
     assert.equal(config.comic.userEnabled, false)
     assert.equal(config.maxConcurrentLLM, 4)

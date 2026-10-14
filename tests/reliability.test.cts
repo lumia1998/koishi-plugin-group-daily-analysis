@@ -239,6 +239,35 @@ test('comic receives the complete analysis report before rendering its reference
     assert.deepEqual(comicPayload.analysisResult, analysis)
 })
 
+test('a disabled group comic still produces and saves its ordinary analysis report', async () => {
+    const { service, ctx, table, sent } = fixture()
+    service.config.comic.enabled = service.config.comic.autoSend = true
+    service.config.listenerGroups = [
+        {
+            platform: 'onebot',
+            selfId: 'bot',
+            channelId: 'g',
+            guildId: 'g',
+            enabled: true,
+            comicEnabled: false
+        }
+    ]
+    ctx.parallel = async () => {
+        assert.fail('a disabled group must not launch an automatic comic')
+    }
+    const report = await service.executeGroupAnalysis(
+        'bot',
+        { channelId: 'g', guildId: 'g' },
+        1,
+        'text'
+    )
+    assert.equal(report.topics.length, 1)
+    const rows = [...table('chatluna_analysis_reports').values()]
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].status, 'completed')
+    assert.ok(sent.some(([, content]) => String(content).includes('热门话题')))
+})
+
 test('history/redraw are scoped to the current group and enable action belongs to enable command', async () => {
     const { ctx, service, table } = fixture()
     const registered = new Map<string, any>()
@@ -297,6 +326,48 @@ test('history/redraw are scoped to the current group and enable action belongs t
             .actions[0]({ session, options: {} }, 'foreign'),
         /找不到/
     )
+    ctx.config = service.config
+    ctx.scope = { parent: { scope: { parent: { scope: { update() {} } } } } }
+    const own = { ...session, enabled: false, comicEnabled: false }
+    const otherBot = { ...own, selfId: 'other' }
+    const otherPlatform = { ...own, platform: 'other' }
+    service.config.listenerGroups = [otherBot, otherPlatform, own]
+    const managedSession = {
+        ...session,
+        event: { guild: { id: 'g', name: 'g' } },
+        bot: { getGuild: async () => ({ name: 'g' }) }
+    }
+    await registered
+        .get('群分析.enable')
+        .actions[0]({ session: managedSession })
+    assert.equal(own.enabled, true)
+    assert.equal(
+        own.comicEnabled,
+        false,
+        're-enabling keeps the comic preference'
+    )
+    assert.equal(otherBot.enabled, false)
+    assert.equal(otherPlatform.enabled, false)
+    assert.match(
+        await registered
+            .get('群分析.status')
+            .actions[0]({ session: managedSession }),
+        /已启用/
+    )
+    await registered
+        .get('群分析.disable')
+        .actions[0]({ session: managedSession })
+    assert.equal(own.enabled, false)
+    assert.equal(own.comicEnabled, false)
+    assert.equal(service.config.listenerGroups.length, 3)
+    const noGuild = { ...own, channelId: 'another', guildId: undefined }
+    service.config.listenerGroups = [noGuild]
+    await registered.get('群分析.enable').actions[0]({
+        session: { ...managedSession, channelId: 'new', guildId: undefined }
+    })
+    assert.equal(noGuild.enabled, false, 'missing guild IDs must not match')
+    assert.equal(service.config.listenerGroups.length, 2)
+    assert.equal(service.config.listenerGroups[1].comicEnabled, true)
 })
 
 test('token accounting is isolated across concurrent tasks and supports Responses usage', async (t) => {
@@ -618,6 +689,56 @@ test('module checkpoints save successful LLM outputs and rerun only the failed m
     assert.equal(quoteCalls, 1)
     assert.equal(qualityCalls, 1)
     assert.equal(titleCalls, 2)
+})
+
+test('all text API failures stop the report instead of saving and sending empty analysis', async (t) => {
+    const { service, ctx, table, sent } = fixture()
+    const secret = 'private-text-api-key'
+    Object.assign(service.config.llm, {
+        baseUrl: 'https://provider.example',
+        model: 'text',
+        apiKey: secret,
+        retryCount: 0
+    })
+    service.config.comic.enabled = service.config.comic.autoSend = true
+    ctx.chatluna_group_analysis_llm = Object.assign(
+        Object.create(LLMService.prototype),
+        { ctx, config: service.config }
+    )
+    ctx.chatluna_group_analysis_renderer.renderGroupAnalysis = async () => {
+        assert.fail('a completely failed analysis must not be rendered')
+    }
+    ctx.parallel = async () => {
+        assert.fail('a completely failed analysis must not start a comic')
+    }
+    let calls = 0
+    t.mock.method(globalThis, 'fetch', async () => {
+        calls++
+        return new Response(
+            JSON.stringify({
+                error: { message: `invalid API key: ${secret}` }
+            }),
+            { status: 401 }
+        )
+    })
+    const completed = await service.executeGroupAnalysis(
+        'bot',
+        { channelId: 'g', guildId: 'g' },
+        1,
+        'image'
+    )
+    assert.equal(completed, undefined)
+    assert.equal(calls, 4)
+    assert.equal(table('chatluna_analysis_reports').size, 0)
+    const checkpoints = [...table('chatluna_analysis_checkpoints').values()]
+    assert.equal(checkpoints.length, 1)
+    assert.equal(checkpoints[0].status, 'failed')
+    assert.equal(JSON.parse(checkpoints[0].payload).result, undefined)
+    const notifications = sent.map(([, payload]) => String(payload)).join('\n')
+    assert.match(notifications, /文本分析全部失败/)
+    assert.match(notifications, /话题、称号、金句、聊天质量/)
+    assert.match(notifications, /HTTP 401/)
+    assert.doesNotMatch(notifications, /private-text-api-key|<img/)
 })
 
 test('QQ official reports use a platform-specific Markdown payload while other platforms stay generic', () => {

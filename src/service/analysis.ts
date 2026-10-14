@@ -23,6 +23,7 @@ import {
     getStartTimeByDays,
     isAutoAnalysisGroup,
     isCacheExpiredByDays,
+    isGroupComicEnabled,
     mergePersona,
     shouldListenToMessage
 } from '../utils'
@@ -32,6 +33,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { ConcurrencyLimiter } from './limiter'
 import { randomUUID } from 'node:crypto'
+import { errorDetail } from '../diagnostics'
 import {
     generateQQOfficialMarkdown,
     isQQOfficialPlatform
@@ -295,17 +297,18 @@ export class AnalysisService extends Service {
             !result.topics?.length
         )
             return
+        const group = {
+            ...target,
+            platform:
+                this._getBot(selfId, target.platform)?.platform || 'unknown',
+            selfId,
+            channelId: target.channelId || target.guildId || '',
+            enabled: true
+        }
+        if (!isGroupComicEnabled(group, this.config.listenerGroups)) return
         this.ctx
             .parallel('group-daily-analysis/auto-comic', {
-                group: {
-                    ...target,
-                    platform:
-                        this._getBot(selfId, target.platform)?.platform ||
-                        'unknown',
-                    selfId,
-                    channelId: target.channelId || target.guildId || '',
-                    enabled: true
-                },
+                group,
                 topics: result.topics,
                 analysisResult: result
             })
@@ -1640,17 +1643,32 @@ export class AnalysisService extends Service {
             quoteResult.status === 'fulfilled' ? quoteResult.value : []
         const chatQuality =
             qualityResult.status === 'fulfilled' ? qualityResult.value : null
+        const failedModules: string[] = []
+        const failureReasons: string[] = []
         for (const [name, result] of [
             ['话题', topicResult],
             ['称号', titleResult],
             ['金句', quoteResult],
             ['聊天质量', qualityResult]
         ] as const) {
-            if (result.status === 'rejected')
+            if (result.status === 'rejected') {
+                failedModules.push(name)
+                failureReasons.push(
+                    errorDetail(result.reason, [this.config.llm?.apiKey || ''])
+                        .split('\n')[0]
+                        .slice(0, 300)
+                )
                 this.ctx.logger.error(
                     `${name}分析失败，保留其他模块结果。`,
                     result.reason
                 )
+            }
+        }
+        if (failedModules.length === 4) {
+            const reasons = [...new Set(failureReasons)].join('；')
+            throw new Error(
+                `文本分析全部失败（${failedModules.join('、')}），未生成分析报告。原因：${reasons}`
+            )
         }
 
         // Final statistics
@@ -1680,18 +1698,7 @@ export class AnalysisService extends Service {
         const groupName = await this.resolveGroupName(selfId, target)
 
         const result: GroupAnalysisResult = {
-            failedModules: [
-                ['话题', topicResult],
-                ['称号', titleResult],
-                ['金句', quoteResult],
-                ['聊天质量', qualityResult]
-            ]
-                .filter(
-                    ([, item]) =>
-                        (item as PromiseSettledResult<unknown>).status ===
-                        'rejected'
-                )
-                .map(([name]) => String(name)),
+            failedModules,
             totalMessages: messages.length,
             totalChars,
             totalParticipants: users.length,

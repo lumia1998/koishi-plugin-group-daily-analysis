@@ -7,6 +7,7 @@ export interface GroupListener {
     platform: string
     guildId?: string
     enabled: boolean
+    comicEnabled?: boolean
 }
 
 export type GroupListMode = 'inherit' | 'whitelist' | 'blacklist'
@@ -16,7 +17,8 @@ const GroupListener: Schema<GroupListener> = Schema.object({
     selfId: Schema.string().required().description('机器人 ID'),
     channelId: Schema.string().required().description('频道 ID'),
     guildId: Schema.string().description('群组 ID'),
-    enabled: Schema.boolean().default(true).description('是否在此频道启用监听')
+    enabled: Schema.boolean().default(true).description('是否在此频道启用监听'),
+    comicEnabled: Schema.boolean().default(true).description('启用群漫画')
 })
 
 export interface Config {
@@ -79,11 +81,13 @@ export const Config: Schema<Config> = Schema.intersect([
         enableAllGroupsByDefault: Schema.boolean()
             .default(false)
             .description(
-                '为所有群默认启用群分析。开启后与 listenerGroups 不兼容（将忽略其配置）；即使开启并启用数据库记录，数据库也只会记录实际触发的群消息。'
+                '为所有群默认启用群分析和监听，仍遵循监听群组列表中的群漫画开关。数据库只会记录实际触发的群消息。'
             ),
         listenerGroups: Schema.array(GroupListener)
             .role('table')
-            .description('数据库监听规则列表。')
+            .description(
+                '数据库监听规则列表。每行可独立关闭群漫画，不影响普通群日报和用户画像漫画。'
+            )
             .default([]),
         autoAnalysisGroupMode: Schema.union([
             Schema.const('inherit').description('继承基础监听群组'),

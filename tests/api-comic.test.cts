@@ -13,6 +13,7 @@ import { apply, todayWindow } from '../src/plugins/comic'
 import { listModels } from '../src/models'
 import { createTrace, errorKind } from '../src/diagnostics'
 import { buildGroupComicImagePrompt } from '../src/comic-prompts'
+import { isGroupComicEnabled, shouldListenToMessage } from '../src/utils'
 
 test('API errors preserve provider details and network codes without credentials', async (t) => {
     t.mock.method(
@@ -92,6 +93,44 @@ test('schema supplies nested API and disabled-comic defaults', () => {
     assert.equal(config.maxGoldenQuotes, undefined)
     assert.equal(config.debug, false)
     assert.deepEqual(config.cronOutputFormats, [])
+})
+
+test('per-group comic switches default to enabled and isolate platform, bot and group', () => {
+    const session = {
+        platform: 'onebot',
+        selfId: 'bot',
+        channelId: 'g',
+        guildId: 'g'
+    }
+    const config = Config({ listenerGroups: [{ ...session, enabled: true }] })
+    assert.equal(config.listenerGroups[0].comicEnabled, true)
+    const closed = { ...session, enabled: true, comicEnabled: false }
+    assert.equal(isGroupComicEnabled(session, []), true)
+    assert.equal(
+        isGroupComicEnabled(session, [{ ...session, enabled: true }]),
+        true
+    )
+    assert.equal(isGroupComicEnabled(session, [closed]), false)
+    assert.equal(shouldListenToMessage(session, [closed]), true)
+    for (const unrelated of [
+        { ...closed, platform: 'other' },
+        { ...closed, selfId: 'other' },
+        { ...closed, channelId: 'other', guildId: 'other' }
+    ])
+        assert.equal(isGroupComicEnabled(session, [unrelated]), true)
+    assert.equal(
+        isGroupComicEnabled(session, [
+            { ...closed, comicEnabled: true },
+            closed
+        ]),
+        false,
+        'an explicit disabled duplicate must take precedence'
+    )
+    assert.equal(
+        isGroupComicEnabled({ ...session, channelId: 'thread' }, [closed]),
+        false,
+        'guild matching follows the listener group scope'
+    )
 })
 
 test('detailed logging is opt-in and API traces omit secrets and bodies', async (t) => {
@@ -598,6 +637,29 @@ test('comic pipeline uses the group report image and enforces cooldown and group
     assert.equal(calls, 1)
     assert.match(await action({ session }, 1), /冷却/)
     assert.equal(calls, 1)
+    config.listenerGroups.push({
+        platform: session.platform,
+        selfId: session.selfId,
+        guildId: session.guildId,
+        channelId: session.channelId,
+        enabled: true,
+        comicEnabled: false
+    })
+    const sentBeforeClosed = sent.length
+    assert.match(await action({ session }, 1), /本群已关闭群漫画/)
+    assert.equal(calls, 1, 'a disabled row overrides default all-group access')
+    assert.equal(sent.length, sentBeforeClosed)
+    config.comic.groupMode = 'whitelist'
+    config.comic.groups = [session.guildId]
+    assert.match(await action({ session }, 1), /本群已关闭群漫画/)
+    config.listenerGroups[0].comicEnabled = true
+    config.comic.groupMode = 'blacklist'
+    assert.match(await action({ session }, 1), /本群未开放群漫画/)
+    config.comic.groupMode = 'inherit'
+    config.comic.enabled = false
+    assert.match(await action({ session }, 1), /启用漫画功能/)
+    config.comic.enabled = true
+    assert.equal(calls, 1, 'the row switch must respect global permissions')
     t.mock.restoreAll()
     t.mock.method(globalThis, 'fetch', async () => {
         calls++
@@ -636,6 +698,16 @@ test('comic pipeline uses the group report image and enforces cooldown and group
     await events['group-daily-analysis/auto-comic'](group)
     assert.equal(calls, 2, 'automatic comics are opt-in')
     config.comic.autoSend = true
+    config.listenerGroups.push({ ...group, comicEnabled: false })
+    const sentBeforeAutoClosed = sent.length
+    await events['group-daily-analysis/auto-comic'](group)
+    assert.equal(calls, 2, 'a disabled group must not call the image API')
+    assert.equal(
+        sent.length,
+        sentBeforeAutoClosed,
+        'automatic skips are silent'
+    )
+    config.listenerGroups[1].comicEnabled = true
     await events['group-daily-analysis/auto-comic'](group)
     assert.equal(calls, 3)
     await events['group-daily-analysis/auto-comic'](group)

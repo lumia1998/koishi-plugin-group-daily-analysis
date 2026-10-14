@@ -99,6 +99,16 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
     const sent: any[] = []
     const config = Config({
         enableAllGroupsByDefault: true,
+        listenerGroups: [
+            {
+                platform: 'onebot',
+                selfId: 'bot',
+                channelId: 'g',
+                guildId: 'g',
+                enabled: true,
+                comicEnabled: false
+            }
+        ],
         comic: {
             enabled: true,
             userEnabled: true,
@@ -258,6 +268,7 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
     assert.equal(ids.at(-1), 'self')
     assert.equal(imageCalls, 1)
     assert.ok(sent.some((item) => String(item).includes('<img')))
+    config.listenerGroups[0].comicEnabled = true
     assert.match(
         await action(
             { session: { ...session, channelId: 'unauthorized' } },
@@ -302,7 +313,9 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
         /群聊/
     )
     config.enableAllGroupsByDefault = false
+    config.listenerGroups[0].enabled = false
     assert.match(await action({ session }), /未启用群分析/)
+    config.listenerGroups[0].enabled = true
     config.enableAllGroupsByDefault = true
     config.comic.userEnabled = false
     assert.match(await action({ session }), /启用漫画服务/)

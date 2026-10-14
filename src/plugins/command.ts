@@ -1,7 +1,11 @@
 /* eslint-disable max-len, @typescript-eslint/no-explicit-any */
 import { Context, h, Session } from 'koishi'
 import { Config } from '../config'
-import { generateTextReport, shouldListenToMessage } from '../utils'
+import {
+    generateTextReport,
+    matchesListenerGroup,
+    shouldListenToMessage
+} from '../utils'
 import { skinRegistry } from '../skins'
 import {
     generateQQOfficialMarkdown,
@@ -232,11 +236,7 @@ export function apply(ctx: Context, config: Config) {
             const config = ctx.config as Config
 
             const originalGroupSetting = config.listenerGroups.find(
-                (settings) =>
-                    (settings.channelId === session.channelId &&
-                        session.channelId != null) ||
-                    (settings.guildId !== null &&
-                        settings.guildId === session.guildId)
+                (settings) => matchesListenerGroup(session, settings)
             )
 
             if (originalGroupSetting) {
@@ -247,6 +247,7 @@ export function apply(ctx: Context, config: Config) {
                     channelId: session.channelId,
                     selfId: session.selfId,
                     enabled: true,
+                    comicEnabled: true,
                     platform: session.platform
                 })
             }
@@ -273,16 +274,12 @@ export function apply(ctx: Context, config: Config) {
 
             const config = ctx.config as Config
 
-            const originalGroupSetting = config.listenerGroups.findIndex(
-                (settings) =>
-                    (settings.channelId === session.channelId &&
-                        session.channelId != null) ||
-                    (settings.guildId !== null &&
-                        settings.guildId === session.guildId)
+            const originalGroupSetting = config.listenerGroups.find(
+                (settings) => matchesListenerGroup(session, settings)
             )
 
-            if (originalGroupSetting !== -1) {
-                config.listenerGroups.splice(originalGroupSetting, 1)
+            if (originalGroupSetting) {
+                originalGroupSetting.enabled = false
             }
 
             ctx.scope.parent.scope.parent.scope.update(config, true)
@@ -327,11 +324,7 @@ export function apply(ctx: Context, config: Config) {
             const config = ctx.config as Config
 
             const originalGroupSetting = config.listenerGroups.find(
-                (settings) =>
-                    (settings.channelId === session.channelId &&
-                        session.channelId != null) ||
-                    (settings.guildId !== null &&
-                        settings.guildId === session.guildId)
+                (settings) => matchesListenerGroup(session, settings)
             )
 
             ctx.scope.parent.scope.parent.scope.update(config, true)
