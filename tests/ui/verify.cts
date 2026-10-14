@@ -65,8 +65,20 @@ async function main() {
                 const panel = document
                     .querySelector('.plugin-view')!
                     .getBoundingClientRect()
+                const content = document.querySelector('.k-content')!
+                const textLeft =
+                    content.getBoundingClientRect().left +
+                    parseFloat(getComputedStyle(content).paddingLeft)
+                const expectedLeft = document
+                    .querySelector('.group-analysis-navigation')!
+                    .classList.contains('is-compact')
+                    ? panel.left + 16
+                    : Math.max(
+                          panel.left + 16,
+                          panel.left + (textLeft - panel.left - nav.width) / 2
+                      )
                 return (
-                    Math.abs(nav.left - panel.left) < 1 &&
+                    Math.abs(nav.left - expectedLeft) < 1 &&
                     Math.abs(
                         nav.top + nav.height / 2 - panel.top - panel.height / 2
                     ) < 1
@@ -91,7 +103,7 @@ async function main() {
                     }
                 }
             )
-            assert.ok(Math.abs(bounds.left - bounds.panelLeft) < 1)
+            assert.ok(bounds.left >= bounds.panelLeft + 16)
             assert.ok(Math.abs(bounds.center - bounds.panelCenter) < 1)
             assert.ok(bounds.top >= bounds.panelTop)
             assert.ok(bounds.bottom <= bounds.panelBottom)
@@ -126,7 +138,7 @@ async function main() {
                 }
             }
         )
-        assert.equal(desktopPosition.left, desktopPosition.panelLeft)
+        assert.ok(desktopPosition.left > desktopPosition.panelLeft)
         assert.ok(desktopPosition.right < desktopPosition.formLeft)
         assert.ok(desktopPosition.top > desktopPosition.panelTop)
         await assertCentered()
@@ -319,7 +331,7 @@ async function main() {
                 return { left: bounds.left, right: bounds.right }
             }
         )
-        assert.equal(mobilePosition.left, 0)
+        assert.equal(mobilePosition.left, 16)
         assert.ok(mobilePosition.right < 390 / 2 + 16)
         await assertCentered()
         await page.click('.navigation-toggle')
@@ -337,7 +349,7 @@ async function main() {
         await assertCentered()
         assert.deepEqual(errors, [])
         console.log(
-            `UI passed: ${headings.length} actual schema sections, flush left panel edge and vertical centering, click/scroll highlight, dynamic sections, plugin isolation, cleanup, resize, desktop/wide/dark/mobile/short screen. Screenshots: ${path.resolve('artifacts/navigation')}`
+            `UI passed: ${headings.length} actual schema sections, centered in left gutter and vertical centering, click/scroll highlight, dynamic sections, plugin isolation, cleanup, resize, desktop/wide/dark/mobile/short screen. Screenshots: ${path.resolve('artifacts/navigation')}`
         )
         await verifyReports(browser)
     } finally {

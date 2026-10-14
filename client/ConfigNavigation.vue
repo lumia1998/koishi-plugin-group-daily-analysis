@@ -89,8 +89,17 @@ function updateLayout() {
     compact.value = nextCompact
     view.classList.toggle('group-analysis-navigation-wide', !nextCompact)
     const bounds = view.getBoundingClientRect()
+    const contentBounds = content.getBoundingClientRect()
+    const textLeft =
+        contentBounds.left +
+        (parseFloat(window.getComputedStyle(content).paddingLeft) || 0)
+    const navigationWidth =
+        navigation.value?.getBoundingClientRect().width || 182
+    const left = nextCompact
+        ? bounds.left + 16
+        : bounds.left + (textLeft - bounds.left - navigationWidth) / 2
     position.value = {
-        '--navigation-left': `${bounds.left}px`,
+        '--navigation-left': `${Math.max(bounds.left + 16, left)}px`,
         '--navigation-top': `${bounds.top + bounds.height / 2}px`,
         '--navigation-max-height': `${Math.max(0, bounds.height - 96)}px`
     }
