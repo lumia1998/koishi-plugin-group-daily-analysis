@@ -57,6 +57,28 @@ async function main() {
         page.on('pageerror', (error: Error) => errors.push(error.message))
         await page.setViewport({ width: 1440, height: 1000 })
         await page.goto(`${server.resolvedUrls.local[0]}tests/ui/index.html`)
+        async function assertCentered() {
+            const bounds = await page.$eval(
+                '.group-analysis-navigation',
+                (node: Element) => {
+                    const nav = node.getBoundingClientRect()
+                    const panel = document
+                        .querySelector('.plugin-view')!
+                        .getBoundingClientRect()
+                    return {
+                        center: nav.top + nav.height / 2,
+                        panelCenter: panel.top + panel.height / 2,
+                        top: nav.top,
+                        bottom: nav.bottom,
+                        panelTop: panel.top,
+                        panelBottom: panel.bottom
+                    }
+                }
+            )
+            assert.ok(Math.abs(bounds.center - bounds.panelCenter) < 1)
+            assert.ok(bounds.top >= bounds.panelTop)
+            assert.ok(bounds.bottom <= bounds.panelBottom)
+        }
         const links = '.navigation-links > a'
         await page.waitForFunction(
             (count: number) =>
@@ -71,6 +93,30 @@ async function main() {
             ),
             headings
         )
+        const desktopPosition = await page.$eval(
+            '.group-analysis-navigation',
+            (node: Element) => {
+                const nav = node.getBoundingClientRect()
+                const view = document.querySelector('.plugin-view')!
+                const form = document.querySelector('.k-schema-left')!
+                return {
+                    left: nav.left,
+                    right: nav.right,
+                    top: nav.top,
+                    panelLeft: view.getBoundingClientRect().left,
+                    panelTop: view.getBoundingClientRect().top,
+                    formLeft: form.getBoundingClientRect().left
+                }
+            }
+        )
+        assert.ok(desktopPosition.left > desktopPosition.panelLeft)
+        assert.ok(desktopPosition.right < desktopPosition.formLeft)
+        assert.ok(desktopPosition.top > desktopPosition.panelTop)
+        await assertCentered()
+        await page.click('.navigation-toggle')
+        await assertCentered()
+        await page.click('.navigation-toggle')
+        await assertCentered()
         await page.click(`${links}:nth-child(5)`)
         assert.equal(
             await page.$eval(
@@ -90,8 +136,18 @@ async function main() {
             const top = document
                 .querySelectorAll('.k-schema-header')[4]
                 .getBoundingClientRect().top
-            return top >= 0 && top < 60
+            const panelTop = document
+                .querySelector('.plugin-view')!
+                .getBoundingClientRect().top
+            return top >= panelTop && top < panelTop + 60
         })
+        assert.equal(
+            await page.$eval(
+                '.group-analysis-navigation',
+                (node: Element) => node.getBoundingClientRect().top
+            ),
+            desktopPosition.top
+        )
         assert.equal(
             await page.$eval(`${links}:nth-child(5)`, (node: Element) =>
                 node.getAttribute('aria-current')
@@ -106,6 +162,7 @@ async function main() {
             {},
             headings.length + 1
         )
+        await assertCentered()
         await page.evaluate(() => (window as any).addLegacySections())
         await page.waitForFunction(
             (count: number) =>
@@ -146,6 +203,12 @@ async function main() {
             ),
             null
         )
+        assert.equal(
+            await page.$eval('.plugin-view', (node: Element) =>
+                node.classList.contains('group-analysis-navigation-wide')
+            ),
+            false
+        )
         await page.evaluate(() =>
             (window as any).changePlugin('group-analysis')
         )
@@ -158,7 +221,9 @@ async function main() {
             ),
             false
         )
-        await page.evaluate(() => window.scrollTo(0, 0))
+        await page.evaluate(() =>
+            document.querySelector('.el-scrollbar__wrap')!.scrollTo(0, 0)
+        )
         await page.mouse.move(0, 0)
         await fs.mkdir('artifacts/navigation', { recursive: true })
         await page.screenshot({ path: 'artifacts/navigation/desktop.png' })
@@ -166,14 +231,24 @@ async function main() {
             document.documentElement.classList.add('dark')
         )
         await page.screenshot({ path: 'artifacts/navigation/dark.png' })
-        await page.setViewport({ width: 390, height: 844 })
-        await page.reload()
-        await page.waitForSelector('.navigation-toggle')
+        await page.setViewport({ width: 1280, height: 1000 })
+        await page.waitForFunction(() =>
+            document
+                .querySelector('.group-analysis-navigation')
+                ?.classList.contains('is-compact')
+        )
+        await assertCentered()
         assert.equal(
             await page.$eval('.navigation-toggle', (node: Element) =>
                 node.getAttribute('aria-expanded')
             ),
             'false'
+        )
+        assert.equal(
+            await page.$eval('.plugin-view', (node: Element) =>
+                node.classList.contains('group-analysis-navigation-wide')
+            ),
+            false
         )
         await page.click('.navigation-toggle')
         await page.click(`${links}:nth-child(3)`)
@@ -183,11 +258,48 @@ async function main() {
                     .querySelector('.navigation-toggle')
                     ?.getAttribute('aria-expanded') === 'false'
         )
+        await page.setViewport({ width: 1440, height: 1000 })
+        await page.waitForFunction(() =>
+            document
+                .querySelector('.plugin-view')
+                ?.classList.contains('group-analysis-navigation-wide')
+        )
+        await assertCentered()
+        await page.setViewport({ width: 390, height: 844 })
+        await page.reload()
+        await page.waitForSelector('.navigation-toggle')
+        assert.equal(
+            await page.$eval('.navigation-toggle', (node: Element) =>
+                node.getAttribute('aria-expanded')
+            ),
+            'false'
+        )
+        const mobilePosition = await page.$eval(
+            '.group-analysis-navigation',
+            (node: Element) => {
+                const bounds = node.getBoundingClientRect()
+                return { left: bounds.left, right: bounds.right }
+            }
+        )
+        assert.equal(mobilePosition.left, 16)
+        assert.ok(mobilePosition.right < 390 / 2 + 16)
+        await assertCentered()
         await page.click('.navigation-toggle')
+        await page.click(`${links}:nth-child(3)`)
+        await page.waitForFunction(
+            () =>
+                document
+                    .querySelector('.navigation-toggle')
+                    ?.getAttribute('aria-expanded') === 'false'
+        )
+        await page.click('.navigation-toggle')
+        await assertCentered()
         await page.screenshot({ path: 'artifacts/navigation/mobile.png' })
+        await page.setViewport({ width: 390, height: 400 })
+        await assertCentered()
         assert.deepEqual(errors, [])
         console.log(
-            `UI passed: ${headings.length} actual schema sections, click/scroll highlight, dynamic sections, plugin isolation, cleanup, links, desktop/dark/mobile. Screenshots: ${path.resolve('artifacts/navigation')}`
+            `UI passed: ${headings.length} actual schema sections, left panel centering, click/scroll highlight, dynamic sections, plugin isolation, cleanup, resize, desktop/dark/mobile/short screen. Screenshots: ${path.resolve('artifacts/navigation')}`
         )
         await verifyReports(browser)
     } finally {

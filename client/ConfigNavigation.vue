@@ -3,6 +3,8 @@
         v-if="isOwn"
         ref="navigation"
         class="group-analysis-navigation"
+        :class="{ 'is-compact': compact }"
+        :style="position"
         aria-label="群分析配置目录"
     >
         <button
@@ -50,12 +52,16 @@ const isOwn = computed(() =>
 )
 const navigation = ref<HTMLElement>()
 const expanded = ref(typeof window !== 'undefined' && window.innerWidth >= 1000)
+const compact = ref(typeof window !== 'undefined' && window.innerWidth < 1000)
+const position = ref<Record<string, string>>({})
 type Section = { id: string; title: string; element: HTMLElement }
 const sections = ref<Section[]>([])
 const active = ref('')
 let mutation: MutationObserver | undefined
 let intersection: IntersectionObserver | undefined
+let resize: ResizeObserver | undefined
 let view: HTMLElement | undefined
+let content: HTMLElement | undefined
 const assignedIds = new Map<HTMLElement, string>()
 let nextId = 0
 const excludedSectionTitles = new Set(['过滤器设置', '运行日志'])
@@ -63,13 +69,31 @@ const excludedSectionTitles = new Set(['过滤器设置', '运行日志'])
 function cleanup() {
     mutation?.disconnect()
     intersection?.disconnect()
+    resize?.disconnect()
+    window.removeEventListener('resize', updateLayout)
+    view?.classList.remove('group-analysis-navigation-wide')
     for (const [element, id] of assignedIds) {
         if (element.id === id) element.removeAttribute('id')
     }
     assignedIds.clear()
     clearConfigLabels(view)
     view = undefined
+    content = undefined
     sections.value = []
+}
+
+function updateLayout() {
+    if (!view || !content) return
+    const nextCompact = view.clientWidth < 1000
+    if (nextCompact && !compact.value) expanded.value = false
+    compact.value = nextCompact
+    view.classList.toggle('group-analysis-navigation-wide', !nextCompact)
+    const bounds = view.getBoundingClientRect()
+    position.value = {
+        '--navigation-left': `${nextCompact ? bounds.left + 16 : content.getBoundingClientRect().left + 24}px`,
+        '--navigation-top': `${bounds.top + bounds.height / 2}px`,
+        '--navigation-max-height': `${Math.max(0, bounds.height - 96)}px`
+    }
 }
 
 function collect() {
@@ -120,7 +144,7 @@ function collect() {
 function navigate(section: Section) {
     active.value = section.id
     section.element.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    if (window.innerWidth < 1000) expanded.value = false
+    if (compact.value) expanded.value = false
 }
 
 watch(
@@ -137,6 +161,12 @@ watch(
         view =
             navigation.value?.closest<HTMLElement>('.plugin-view') || undefined
         if (!view) return
+        content = view.querySelector<HTMLElement>('.k-content') || view
+        updateLayout()
+        resize = new ResizeObserver(updateLayout)
+        resize.observe(view)
+        if (content !== view) resize.observe(content)
+        window.addEventListener('resize', updateLayout)
         collect()
         mutation = new MutationObserver(collect)
         mutation.observe(view, {
@@ -152,6 +182,10 @@ onBeforeUnmount(cleanup)
 </script>
 
 <style>
+.plugin-view.group-analysis-navigation-wide .k-content {
+    max-width: calc(55rem + 212px);
+    padding-left: calc(var(--content-padding, 3rem) + 212px);
+}
 .group-analysis-config-label {
     font-size: 0 !important;
 }
@@ -167,8 +201,9 @@ onBeforeUnmount(cleanup)
 <style scoped>
 .group-analysis-navigation {
     position: fixed;
-    right: 24px;
-    top: 100px;
+    left: var(--navigation-left, 16px);
+    top: var(--navigation-top, 50%);
+    transform: translateY(-50%);
     z-index: 20;
     width: 180px;
     border: 1px solid var(--k-color-divider, #dce0e5);
@@ -192,7 +227,7 @@ onBeforeUnmount(cleanup)
     float: right;
 }
 .navigation-links {
-    max-height: calc(100vh - 190px);
+    max-height: var(--navigation-max-height, calc(100vh - 160px));
     overflow-y: auto;
     padding: 0 8px 8px;
 }
@@ -213,14 +248,7 @@ onBeforeUnmount(cleanup)
 .navigation-toggle:focus-visible {
     outline: 2px solid var(--k-color-primary, #527ca6);
 }
-@media (max-width: 999px) {
-    .group-analysis-navigation {
-        top: auto;
-        bottom: 24px;
-        right: 16px;
-    }
-    .navigation-links {
-        max-height: 55vh;
-    }
+.is-compact .navigation-links {
+    max-height: min(55vh, var(--navigation-max-height, calc(100vh - 160px)));
 }
 </style>

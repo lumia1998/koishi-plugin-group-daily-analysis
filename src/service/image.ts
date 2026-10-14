@@ -200,9 +200,11 @@ export async function generateImage(
                 body.append('model', config.model)
                 body.append('prompt', prompt)
                 body.append('size', options.size || config.size)
+                // Multipart arrays use image[]; keep image for single-file providers.
+                const imageField = references.length > 1 ? 'image[]' : 'image'
                 references.forEach((item, index) =>
                     body.append(
-                        'image',
+                        imageField,
                         new Blob([new Uint8Array(item)], {
                             type: imageMime(item)
                         }),
