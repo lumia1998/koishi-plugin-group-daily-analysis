@@ -58,6 +58,8 @@ npm install koishi-plugin-group-daily-analysis
 
 OpenAI 在有参考图时调用 `images/edits`，无参考图时调用 `images/generations`。Google 会把参考图以内联图片形式发送，并要求模型返回图片。`baseUrl` 可以填写基础地址、版本地址或完整端点，插件会规范化常见路径。
 
+OpenAI 兼容生图请求使用 `aspect_ratio` 指定比例、`n=1` 请求一张图片，不发送 `size` 或 `quality`，由服务端决定分辨率和默认质量。有参考图时统一在同一个 multipart 请求中使用 `image[]` 字段。群漫画比例由 `comic.aspectRatio` 配置（默认 `16:9`），画像漫画使用 `3:4`；服务商需支持 `aspect_ratio` 扩展字段。旧版 `comic.size` 不再用于请求。
+
 当前漫画没有单独的文本分镜调用。手动群漫画在没有现成话题时仍会调用文本模型提取话题；用户画像漫画只读取已保存画像，不会重新分析聊天记录。
 
 ## 群分析

@@ -137,6 +137,7 @@ export async function generateImage(
     parentSignal?.addEventListener('abort', abort, { once: true })
     const timer = setTimeout(abort, config.timeout * 1000)
     const started = Date.now()
+    const aspectRatio = options.aspectRatio || config.aspectRatio || '16:9'
     const requestId = randomUUID()
     const originalTrace = trace
     const emit: Trace | undefined = originalTrace
@@ -180,7 +181,7 @@ export async function generateImage(
                     generationConfig: {
                         responseModalities: ['TEXT', 'IMAGE'],
                         imageConfig: {
-                            aspectRatio: options.aspectRatio || '16:9'
+                            aspectRatio
                         }
                     }
                 },
@@ -207,12 +208,12 @@ export async function generateImage(
                 const body = new FormData()
                 body.append('model', config.model)
                 body.append('prompt', prompt)
-                body.append('size', options.size || config.size)
-                // Keep all references in one request. Some compatible gateways
-                // accept repeated image fields but fail on the image[] alias.
+                body.append('aspect_ratio', aspectRatio)
+                body.append('n', '1')
+                // Upload all references together as a multipart image array.
                 references.forEach((item, index) =>
                     body.append(
-                        'image',
+                        'image[]',
                         new Blob([new Uint8Array(item)], {
                             type: imageMime(item)
                         }),
@@ -226,10 +227,12 @@ export async function generateImage(
                     method: 'POST',
                     endpoint: errorDetail(safeUrl.toString(), [config.apiKey]),
                     contentType: 'multipart/form-data (自动生成 boundary)',
-                    uploadFormat: 'repeated-image-v2',
-                    imageField: 'image',
+                    uploadFormat: 'image-array-ratio-v3',
+                    imageField: 'image[]',
                     referenceCount: references.length,
-                    size: options.size || config.size,
+                    aspectRatio,
+                    n: 1,
+                    quality: 'server-default',
                     promptSha256: createHash('sha256')
                         .update(prompt)
                         .digest('hex'),
@@ -284,7 +287,7 @@ export async function generateImage(
                     {
                         model: config.model,
                         prompt,
-                        size: options.size || config.size,
+                        aspect_ratio: aspectRatio,
                         n: 1
                     },
                     config.timeout,

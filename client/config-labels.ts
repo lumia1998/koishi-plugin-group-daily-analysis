@@ -47,7 +47,7 @@ export const configLabels: Record<string, string> = {
     groups: '漫画群组列表',
     referenceImage: '主要角色参考图',
     cooldown: '漫画冷却时间',
-    size: '漫画尺寸',
+    aspectRatio: '漫画比例',
     personaAnalysisMessageInterval: '画像更新消息阈值',
     personaCacheLifetimeDays: '画像缓存天数',
     personaLookbackDays: '画像回溯天数',

@@ -350,9 +350,12 @@ test('Google reference is inlineData; OpenAI reference is multipart edits', asyn
         assert.equal(url, base + '/v1/images/edits')
         const form = init!.body as FormData
         assert.equal(form.get('prompt'), 'storyboard')
-        assert.equal(form.get('size'), '1024x1536')
+        assert.equal(form.get('size'), null)
+        assert.equal(form.get('quality'), null)
+        assert.equal(form.get('aspect_ratio'), '3:4')
+        assert.equal(form.get('n'), '1')
         assert.deepEqual(
-            Buffer.from(await (form.get('image') as Blob).arrayBuffer()),
+            Buffer.from(await (form.get('image[]') as Blob).arrayBuffer()),
             png
         )
         return json({ data: [{ b64_json: png.toString('base64') }] })

@@ -36,7 +36,7 @@ export interface Config {
         referenceImage: string
         timeout: number
         cooldown: number
-        size: string
+        aspectRatio: string
     }
     enableAllGroupsByDefault: boolean
     listenerGroups: GroupListener[]
@@ -331,10 +331,11 @@ export const Config: Schema<Config> = Schema.intersect([
                 .min(0)
                 .default(10)
                 .description('每群漫画冷却时间（分钟）。'),
-            size: Schema.string()
-                .default('1536x1024')
+            aspectRatio: Schema.string()
+                .pattern(/^[1-9]\d*:[1-9]\d*$/)
+                .default('16:9')
                 .description(
-                    'OpenAI 群漫画尺寸；用户画像漫画固定使用竖版 1024x1536。Google 群漫画使用 16:9，用户画像漫画使用 3:4。'
+                    '群漫画宽高比（如 16:9），用户画像漫画使用 3:4。OpenAI 兼容接口发送 aspect_ratio，不指定像素尺寸；需服务商支持该比例字段。'
                 )
         }).description('漫画设置')
     }).description('模型接口与漫画'),

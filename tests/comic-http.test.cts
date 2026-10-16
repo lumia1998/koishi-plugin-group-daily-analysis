@@ -40,7 +40,10 @@ test('comic provider works over real local HTTP and does not retry failed edits'
                 const form = await body.formData()
                 assert.equal(form.get('model'), 'gpt-image-2.5-sunburst')
                 assert.ok(String(form.get('prompt')).length > 0)
-                assert.equal(form.get('size'), '1536x1024')
+                assert.equal(form.get('size'), null)
+                assert.equal(form.get('quality'), null)
+                assert.equal(form.get('aspect_ratio'), '16:9')
+                assert.equal(form.get('n'), '1')
                 for (const [field, value] of form) {
                     if (typeof value === 'string') continue
                     images.push({
@@ -52,15 +55,17 @@ test('comic provider works over real local HTTP and does not retry failed edits'
                 requests.push({ path: request.url, images })
                 assert.ok(images.length > 0)
                 assert.ok(
-                    images.every(({ field }) => field === 'image'),
-                    'all references must use repeated image fields in one request'
+                    images.every(({ field }) => field === 'image[]'),
+                    'all references must use image[] fields in one request'
                 )
             } else {
                 assert.equal(request.url, '/v1/images/generations')
                 const json = await body.json()
                 assert.equal(json.model, 'gpt-image-2.5-sunburst')
                 assert.equal(json.n, 1)
-                assert.equal(json.size, '1536x1024')
+                assert.equal(json.size, undefined)
+                assert.equal(json.quality, undefined)
+                assert.equal(json.aspect_ratio, '16:9')
                 requests.push({ path: request.url!, images })
             }
             response.setHeader('Content-Type', 'application/json')
@@ -93,7 +98,7 @@ test('comic provider works over real local HTTP and does not retry failed edits'
             baseUrl,
             apiKey: 'local-test-key',
             model: 'gpt-image-2.5-sunburst',
-            size: '1536x1024',
+            aspectRatio: '16:9',
             timeout: 5
         }
     })
@@ -107,7 +112,7 @@ test('comic provider works over real local HTTP and does not retry failed edits'
             )
             const request = requests.at(-1)!
             assert.equal(request.path, '/v1/images/edits')
-            assert.equal(request.images[0].field, 'image')
+            assert.equal(request.images[0].field, 'image[]')
             assert.deepEqual(request.images[0].data, png)
         }
     )
@@ -167,7 +172,7 @@ test('comic provider works over real local HTTP and does not retry failed edits'
             const upload = events.find(
                 (event) => event.stage === '图片编辑请求详情'
             )!
-            assert.equal(upload.details.imageField, 'image')
+            assert.equal(upload.details.imageField, 'image[]')
             assert.equal(upload.details.referenceCount, 1)
             const attachment = events.find(
                 (event) => event.stage === '图片编辑附件详情'
