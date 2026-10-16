@@ -51,14 +51,9 @@ test('comic provider works over real local HTTP and does not retry failed edits'
                 }
                 requests.push({ path: request.url, images })
                 assert.ok(images.length > 0)
-                // OpenAI's documented multipart format uses image[] for arrays.
                 assert.ok(
-                    images.every(({ field }) =>
-                        images.length === 1
-                            ? ['image', 'image[]'].includes(field)
-                            : field === 'image[]'
-                    ),
-                    'multiple reference images must use image[]'
+                    images.every(({ field }) => field === 'image'),
+                    'all references must use repeated image fields in one request'
                 )
             } else {
                 assert.equal(request.url, '/v1/images/generations')
@@ -120,11 +115,13 @@ test('comic provider works over real local HTTP and does not retry failed edits'
     await t.test(
         'report and character references survive multipart serialization',
         async () => {
+            const before = requests.length
             assert.deepEqual(
                 await generateImage(config.comic, 'test comic', [png, png]),
                 png
             )
             const images = requests.at(-1)!.images
+            assert.equal(requests.length - before, 1)
             assert.deepEqual(
                 images.map(({ name }) => name),
                 ['reference-0.png', 'reference-1.png']
