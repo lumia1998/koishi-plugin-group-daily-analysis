@@ -4,9 +4,10 @@ import { resolve } from 'node:path'
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import { get } from 'node:https'
+import { createHash, randomUUID } from 'node:crypto'
 import { Config } from '../config'
 import { endpoint, readJson, requestJson } from './api'
-import { errorKind, Trace } from '../diagnostics'
+import { errorDetail, errorKind, Trace } from '../diagnostics'
 
 const MAX_IMAGE = 20 * 1024 * 1024
 
@@ -136,6 +137,13 @@ export async function generateImage(
     parentSignal?.addEventListener('abort', abort, { once: true })
     const timer = setTimeout(abort, config.timeout * 1000)
     const started = Date.now()
+    const requestId = randomUUID()
+    const originalTrace = trace
+    const emit: Trace | undefined = originalTrace
+        ? (stage, details = {}) =>
+              originalTrace(stage, { ...details, requestId })
+        : undefined
+    trace = emit
     trace?.('生图请求开始', {
         format: config.format,
         model: config.model,
@@ -211,6 +219,35 @@ export async function generateImage(
                         `reference-${index}.${imageMime(item).split('/')[1]}`
                     )
                 )
+                const safeUrl = new URL(url)
+                safeUrl.search = ''
+                safeUrl.hash = ''
+                trace?.('图片编辑请求详情', {
+                    method: 'POST',
+                    endpoint: errorDetail(safeUrl.toString(), [config.apiKey]),
+                    contentType: 'multipart/form-data (自动生成 boundary)',
+                    uploadFormat: 'repeated-image-v2',
+                    imageField: 'image',
+                    referenceCount: references.length,
+                    size: options.size || config.size,
+                    promptSha256: createHash('sha256')
+                        .update(prompt)
+                        .digest('hex'),
+                    automaticRetries: 0
+                })
+                references.forEach((data, index) => {
+                    trace?.('图片编辑附件详情', {
+                        index: index + 1,
+                        role: index === 0 ? 'report' : 'character',
+                        mime: imageMime(data),
+                        bytes: data.length,
+                        dimensions:
+                            imageMime(data) === 'image/png' && data.length >= 24
+                                ? `${data.readUInt32BE(16)}x${data.readUInt32BE(20)}`
+                                : 'unknown',
+                        sha256: createHash('sha256').update(data).digest('hex')
+                    })
+                })
                 const response = await fetch(url, {
                     method: 'POST',
                     body,
@@ -220,6 +257,23 @@ export async function generateImage(
                 })
                 trace?.('图片编辑 HTTP 响应', {
                     status: response.status,
+                    contentType: errorDetail(
+                        response.headers.get('content-type') || '',
+                        [config.apiKey]
+                    ),
+                    upstreamRequestId: errorDetail(
+                        response.headers.get('x-request-id') ||
+                            response.headers.get('request-id') ||
+                            '',
+                        [config.apiKey]
+                    ),
+                    cfRay: errorDetail(response.headers.get('cf-ray') || '', [
+                        config.apiKey
+                    ]),
+                    retryAfter: errorDetail(
+                        response.headers.get('retry-after') || '',
+                        [config.apiKey]
+                    ),
                     elapsedMs: Date.now() - started
                 })
                 item = (await readJson(response)).data?.[0]
@@ -252,6 +306,9 @@ export async function generateImage(
         return image
     } catch (error) {
         trace?.('生图失败', {
+            detail: errorDetail(error, [config.apiKey]),
+            parentAborted: !!parentSignal?.aborted,
+            requestAborted: controller.signal.aborted,
             reason: controller.signal.aborted
                 ? 'TimeoutOrCancelled'
                 : errorKind(error),

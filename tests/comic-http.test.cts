@@ -149,11 +149,35 @@ test('comic provider works over real local HTTP and does not retry failed edits'
         async () => {
             fail = true
             const before = requests.length
+            const events: {
+                stage: string
+                details: Record<string, unknown>
+            }[] = []
             await assert.rejects(
-                generateImage(config.comic, 'test comic', png),
+                generateImage(
+                    config.comic,
+                    'test comic',
+                    png,
+                    undefined,
+                    (stage, details = {}) => events.push({ stage, details })
+                ),
                 /HTTP 502.*backend-api\/codex\/images\/edits.*EOF/
             )
             assert.equal(requests.length - before, 1)
+            const upload = events.find(
+                (event) => event.stage === '图片编辑请求详情'
+            )!
+            assert.equal(upload.details.imageField, 'image')
+            assert.equal(upload.details.referenceCount, 1)
+            const attachment = events.find(
+                (event) => event.stage === '图片编辑附件详情'
+            )!
+            assert.equal(attachment.details.dimensions, '1x1')
+            const failure = events.find((event) => event.stage === '生图失败')!
+            assert.match(String(failure.details.detail), /HTTP 502.*EOF/)
+            assert.equal(failure.details.requestId, upload.details.requestId)
+            assert.ok(!JSON.stringify(events).includes('local-test-key'))
+            assert.ok(!JSON.stringify(events).includes(png.toString('base64')))
             fail = false
         }
     )
