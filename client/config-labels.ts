@@ -28,6 +28,8 @@ export const configLabels: Record<string, string> = {
     cronOutputFormats: '定时报表格式',
     uploadGroupFile: '上传群文件',
     uploadGroupAlbum: '上传群相册',
+    groupUploadTransport: '群归档传输方式',
+    groupAlbumName: '目标群相册',
     theme: '明暗模式',
     skin: '报告主题',
     temperature: '生成随机度',

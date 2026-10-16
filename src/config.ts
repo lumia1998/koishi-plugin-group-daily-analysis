@@ -48,6 +48,8 @@ export interface Config {
     cronOutputFormats: ('image' | 'pdf' | 'text' | 'html')[]
     uploadGroupFile: boolean
     uploadGroupAlbum: boolean
+    groupUploadTransport: 'base64' | 'path'
+    groupAlbumName: string
     maxMessages: number
     temperature: number
     minMessages: number
@@ -198,7 +200,20 @@ export const Config: Schema<Config> = Schema.intersect([
             .description('在 OneBot 支持时尝试把报告归档到群文件。'),
         uploadGroupAlbum: Schema.boolean()
             .default(false)
-            .description('在平台提供相册接口时尝试归档图片。'),
+            .description('通过 NapCat / LLOneBot 相册接口归档报告图片。'),
+        groupUploadTransport: Schema.union([
+            Schema.const('base64').description('传输文件内容（跨容器/机器）'),
+            Schema.const('path').description('共享本地路径')
+        ])
+            .default('base64')
+            .description(
+                '群文件和群相册上传方式。路径模式要求协议端能读取 Koishi 的同一绝对路径。'
+            ),
+        groupAlbumName: Schema.string()
+            .default('')
+            .description(
+                '目标群相册名称；留空使用列表中的第一个相册。指定名称不存在时报告失败，不上传到其他相册。'
+            ),
         theme: Schema.union([
             Schema.const('light').description('亮色主题'),
             Schema.const('dark').description('暗色主题'),

@@ -56,6 +56,8 @@ npm install koishi-plugin-group-daily-analysis
 
 文本接口分别使用 OpenAI Responses、Google Gemini `generateContent` 和 Anthropic Messages。生图接口使用 OpenAI Images 或 Google Gemini 图片输出。
 
+群报告归档可分别开启“上传群文件”和“上传群相册”。默认通过 Base64 传输文件内容，适用于 Koishi 与协议端位于不同机器或容器的部署；若协议端仅支持本地路径，可将“群归档传输方式”设为共享路径，确保双方可以读取同一个绝对路径。相册支持 NapCat / LLOneBot：先查询相册，再上传；“目标群相册”留空使用列表第一个相册，指定名称不存在则报错，不会自动创建或改传其他相册。PDF 只归档到群文件。两种归档分别记录成功或错误，检查 OneBot 返回码；请求超时不会自动重传。
+
 OpenAI 在有参考图时调用 `images/edits`，无参考图时调用 `images/generations`。Google 会把参考图以内联图片形式发送，并要求模型返回图片。`baseUrl` 可以填写基础地址、版本地址或完整端点，插件会规范化常见路径。
 
 OpenAI 兼容生图请求使用 `aspect_ratio` 指定比例、`n=1` 请求一张图片，不发送 `size` 或 `quality`，由服务端决定分辨率和默认质量。有参考图时统一在同一个 multipart 请求中使用 `image[]` 字段。群漫画比例由 `comic.aspectRatio` 配置（默认 `16:9`），画像漫画使用 `3:4`；服务商需支持 `aspect_ratio` 扩展字段。旧版 `comic.size` 不再用于请求。

@@ -29,11 +29,10 @@ import {
 } from '../utils'
 import type { GuildMember } from '@satorijs/protocol'
 import type { OneBotBot } from 'koishi-plugin-adapter-onebot'
-import { promises as fs } from 'node:fs'
-import path from 'node:path'
 import { ConcurrencyLimiter } from './limiter'
 import { randomUUID } from 'node:crypto'
 import { errorDetail } from '../diagnostics'
+import { archiveOneBotReport } from './onebot-archive'
 import {
     generateQQOfficialMarkdown,
     isQQOfficialPlatform
@@ -321,44 +320,15 @@ export class AnalysisService extends Service {
         payload: Buffer,
         format: string
     ) {
-        if (
-            bot?.platform !== 'onebot' ||
-            (!this.config.uploadGroupFile && !this.config.uploadGroupAlbum)
-        )
-            return
-        const request = bot.internal?._request
-        const albumOwner =
-            typeof bot.uploadGroupAlbum === 'function' ? bot : bot.internal
-        const album = albumOwner?.uploadGroupAlbum
-        const canUploadFile =
-            this.config.uploadGroupFile && typeof request === 'function'
-        const canUploadAlbum =
-            this.config.uploadGroupAlbum &&
-            format !== 'pdf' &&
-            typeof album === 'function'
-        if (!canUploadFile && !canUploadAlbum) return
-        const dir = path.resolve(
+        await archiveOneBotReport(
+            bot,
+            groupId,
+            payload,
+            format,
+            this.config,
             this.ctx.baseDir,
-            'data/chatluna/group_analysis/archive'
+            this.ctx.logger
         )
-        await fs.mkdir(dir, { recursive: true })
-        const extension = format === 'pdf' ? 'pdf' : 'png'
-        const file = path.join(dir, `report-${Date.now()}.${extension}`)
-        await fs.writeFile(file, payload)
-        try {
-            if (canUploadFile) {
-                await request.call(bot.internal, 'upload_group_file', {
-                    group_id: groupId,
-                    file,
-                    name: path.basename(file)
-                })
-            }
-            if (canUploadAlbum) {
-                await album.call(albumOwner, groupId, file)
-            }
-        } catch (error) {
-            this.ctx.logger.warn('OneBot 报告归档接口不可用，已跳过。', error)
-        }
     }
 
     private setupPersonaMessageListener() {
