@@ -32,7 +32,6 @@ import type { OneBotBot } from 'koishi-plugin-adapter-onebot'
 import { ConcurrencyLimiter } from './limiter'
 import { randomUUID } from 'node:crypto'
 import { errorDetail } from '../diagnostics'
-import { archiveOneBotReport } from './onebot-archive'
 import {
     generateQQOfficialMarkdown,
     isQQOfficialPlatform
@@ -312,23 +311,6 @@ export class AnalysisService extends Service {
                 analysisResult: result
             })
             .catch((error) => this.ctx.logger.warn('自动漫画任务失败。', error))
-    }
-
-    private async archiveOneBotReport(
-        bot: any,
-        groupId: string,
-        payload: Buffer,
-        format: string
-    ) {
-        await archiveOneBotReport(
-            bot,
-            groupId,
-            payload,
-            format,
-            this.config,
-            this.ctx.baseDir,
-            this.ctx.logger
-        )
     }
 
     private setupPersonaMessageListener() {
@@ -873,7 +855,6 @@ export class AnalysisService extends Service {
 
         let message: h
         let completedResult: GroupAnalysisResult | undefined
-        let archivePayload: Buffer | undefined
 
         try {
             let analysisResult: GroupAnalysisResult
@@ -952,7 +933,6 @@ export class AnalysisService extends Service {
                             )
                         if (typeof image === 'string') throw new Error(image)
                         message = h.image(image, 'image/png')
-                        if (Buffer.isBuffer(image)) archivePayload = image
                     }
                     break
                 case 'pdf': {
@@ -962,7 +942,6 @@ export class AnalysisService extends Service {
                         )
                     if (!pdfBuffer) throw new Error('PDF 渲染失败。')
                     message = h.file(pdfBuffer, 'application/pdf')
-                    archivePayload = pdfBuffer
                     break
                 }
                 case 'html': {
@@ -1001,13 +980,6 @@ export class AnalysisService extends Service {
                 checkpoint,
                 'completed'
             )
-            if (archivePayload)
-                await this.archiveOneBotReport(
-                    bot,
-                    targetChannel,
-                    archivePayload,
-                    format
-                ).catch(() => {})
         } catch (error) {
             await this.saveCheckpoint(
                 checkpointId,

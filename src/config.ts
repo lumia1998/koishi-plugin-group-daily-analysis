@@ -12,6 +12,23 @@ export interface GroupListener {
 
 export type GroupListMode = 'inherit' | 'whitelist' | 'blacklist'
 
+export type ComicImageFormat = 'openai' | 'google'
+
+export interface ComicCharacterProfile {
+    profileName: string
+    enabled: boolean
+    persona: string
+    referenceFiles: string[]
+}
+
+export interface ComicFallbackProvider {
+    enabled: boolean
+    format: ComicImageFormat
+    baseUrl: string
+    apiKey: string
+    model: string
+}
+
 const GroupListener: Schema<GroupListener> = Schema.object({
     platform: Schema.string().required().description('平台名称'),
     selfId: Schema.string().required().description('机器人 ID'),
@@ -19,6 +36,43 @@ const GroupListener: Schema<GroupListener> = Schema.object({
     guildId: Schema.string().description('群组 ID'),
     enabled: Schema.boolean().default(true).description('是否在此频道启用监听'),
     comicEnabled: Schema.boolean().default(true).description('启用群漫画')
+})
+
+const comicImageFormat = () =>
+    Schema.union([
+        Schema.const('openai').description('OpenAI Images'),
+        Schema.const('google').description('Google Gemini')
+    ])
+
+const ComicCharacterProfile: Schema<ComicCharacterProfile> = Schema.object({
+    profileName: Schema.string()
+        .default('')
+        .description('方案名称，用于日志和每日随机记录。'),
+    enabled: Schema.boolean().default(true).description('是否参与角色选择。'),
+    persona: Schema.string()
+        .role('textarea')
+        .default('')
+        .description(
+            '角色设定：外观、性格和说话口吻。直接生图时附加到漫画提示词；分镜模式下作为分镜模型的角色人格。'
+        ),
+    referenceFiles: Schema.array(Schema.path({ filters: ['file'] }))
+        .default([])
+        .description(
+            '该角色的参考图（PNG、JPEG 或 WebP，单张最大 20MB），按顺序发送；留空时使用主要角色参考图。'
+        )
+})
+
+const ComicFallbackProvider: Schema<ComicFallbackProvider> = Schema.object({
+    enabled: Schema.boolean().default(true).description('是否启用此备用接口。'),
+    format: comicImageFormat().default('openai').description('生图接口类型。'),
+    baseUrl: Schema.string()
+        .default('')
+        .description('生图接口基础地址，支持带版本的地址或完整接口地址。'),
+    apiKey: Schema.string()
+        .role('secret')
+        .default('')
+        .description('生图接口密钥。'),
+    model: Schema.string().default('').description('模型 ID。')
 })
 
 export interface Config {
@@ -29,14 +83,24 @@ export interface Config {
         autoSend: boolean
         groupMode: GroupListMode
         groups: string[]
-        format: 'openai' | 'google'
+        generationMode: 'direct' | 'storyboard'
+        format: ComicImageFormat
         baseUrl: string
         apiKey: string
         model: string
         referenceImage: string
+        characterProfiles: ComicCharacterProfile[]
+        characterSelection: 'first' | 'daily'
         timeout: number
         cooldown: number
         aspectRatio: string
+        fallbackProviders: ComicFallbackProvider[]
+        networkRetries: number
+        retryDelaySeconds: number
+        contentRetryKeywords: string[]
+        contentRetries: number
+        promptRewrite: boolean
+        fallbackToUrl: boolean
     }
     enableAllGroupsByDefault: boolean
     listenerGroups: GroupListener[]
@@ -46,10 +110,6 @@ export interface Config {
     retentionDays: number
     outputFormat: 'image' | 'pdf' | 'text' | 'html'
     cronOutputFormats: ('image' | 'pdf' | 'text' | 'html')[]
-    uploadGroupFile: boolean
-    uploadGroupAlbum: boolean
-    groupUploadTransport: 'base64' | 'path'
-    groupAlbumName: string
     maxMessages: number
     temperature: number
     minMessages: number
@@ -195,25 +255,6 @@ export const Config: Schema<Config> = Schema.intersect([
             .role('table')
             .default([])
             .description('定时分析输出格式；留空时使用默认输出格式。'),
-        uploadGroupFile: Schema.boolean()
-            .default(false)
-            .description('在 OneBot 支持时尝试把报告归档到群文件。'),
-        uploadGroupAlbum: Schema.boolean()
-            .default(false)
-            .description('通过 NapCat / LLOneBot 相册接口归档报告图片。'),
-        groupUploadTransport: Schema.union([
-            Schema.const('base64').description('传输文件内容（跨容器/机器）'),
-            Schema.const('path').description('共享本地路径')
-        ])
-            .default('base64')
-            .description(
-                '群文件和群相册上传方式。路径模式要求协议端能读取 Koishi 的同一绝对路径。'
-            ),
-        groupAlbumName: Schema.string()
-            .default('')
-            .description(
-                '目标群相册名称；留空使用列表中的第一个相册。指定名称不存在时报告失败，不上传到其他相册。'
-            ),
         theme: Schema.union([
             Schema.const('light').description('亮色主题'),
             Schema.const('dark').description('暗色主题'),
@@ -316,12 +357,21 @@ export const Config: Schema<Config> = Schema.intersect([
                 .role('table')
                 .default([])
                 .description('漫画群组 ID 列表。'),
-            format: Schema.union([
-                Schema.const('openai').description('OpenAI Images'),
-                Schema.const('google').description('Google Gemini')
+            generationMode: Schema.union([
+                Schema.const('storyboard').description(
+                    '文本分镜后生图（默认）'
+                ),
+                Schema.const('direct').description('报告图直接生图（旧版兼容）')
             ])
+                .default('storyboard')
+                .description(
+                    '群漫画生成方式。storyboard 先用文本模型把话题改写为逐格分镜画面提示词（额外消耗一次文本请求），再只附带角色参考图生图；direct 是旧版兼容模式，把渲染好的群分析报告图作为附件 1 直接生图。用户画像漫画始终直接生图。'
+                ),
+            format: comicImageFormat()
                 .default('google')
-                .description('生图接口类型。'),
+                .description(
+                    '生图接口类型。分镜模式只发送角色参考图；直接生图会同时发送报告图和角色参考图，请选择支持对应参考图数量的模型。'
+                ),
             baseUrl: Schema.string().description(
                 '生图接口基础地址。支持填写带版本的地址或完整接口地址；保存地址和密钥后会自动获取模型列表。'
             ),
@@ -335,8 +385,21 @@ export const Config: Schema<Config> = Schema.intersect([
                     '选择支持图片输出的模型。列表由生图服务提供，可能包含文本模型；请根据服务商说明选择，也可手动输入。'
                 ),
             referenceImage: Schema.path({ filters: ['file'] }).description(
-                '漫画主持角色参考图（PNG、JPEG 或 WebP，最大 20MB）。群漫画和用户画像漫画共用此图；留空时由生图模型设计统一角色。'
+                '漫画主持角色参考图（PNG、JPEG 或 WebP，最大 20MB）。群漫画和用户画像漫画共用此图；选中的主持角色方案自带参考图时优先使用方案参考图；都留空时由生图模型设计统一角色。'
             ),
+            characterProfiles: Schema.array(ComicCharacterProfile)
+                .default([])
+                .description(
+                    '主持角色方案。存在启用方案时按角色选择方式选出一个，群漫画和用户画像漫画都使用其角色设定和参考图；为空时使用主要角色参考图。'
+                ),
+            characterSelection: Schema.union([
+                Schema.const('first').description('固定使用第一个启用方案'),
+                Schema.const('daily').description('每天随机选择一个启用方案')
+            ])
+                .default('first')
+                .description(
+                    '每日随机会记录当天的选择，重启后保持不变；所选方案被禁用或删除后重新随机。'
+                ),
             timeout: Schema.number()
                 .min(1)
                 .max(600)
@@ -350,7 +413,49 @@ export const Config: Schema<Config> = Schema.intersect([
                 .pattern(/^[1-9]\d*:[1-9]\d*$/)
                 .default('16:9')
                 .description(
-                    '群漫画宽高比（如 16:9），用户画像漫画使用 3:4。OpenAI 兼容接口发送 aspect_ratio，不指定像素尺寸；需服务商支持该比例字段。'
+                    '群漫画宽高比（如 16:9），用户画像漫画使用 3:4。OpenAI Images 发送 aspect_ratio，Google 发送 imageConfig.aspectRatio；均不指定像素尺寸。'
+                ),
+            fallbackProviders: Schema.array(ComicFallbackProvider)
+                .default([])
+                .description(
+                    '备用生图接口。主接口失败后按列表顺序尝试，每次尝试都可能单独计费；共用超时和比例设置。默认不配置。'
+                ),
+            networkRetries: Schema.number()
+                .min(0)
+                .max(5)
+                .step(1)
+                .default(0)
+                .description(
+                    '同一接口遇到 HTTP 408/409/429/5xx 或连接失败时的重试次数。请求超时不会重试；每次重试都可能重新计费。默认 0 不重试。'
+                ),
+            retryDelaySeconds: Schema.number()
+                .min(0)
+                .max(60)
+                .default(2)
+                .description('生图重试前的等待秒数。'),
+            contentRetryKeywords: Schema.array(String)
+                .role('table')
+                .default([])
+                .description(
+                    '内容异常关键词。生图错误信息包含任一关键词（不区分大小写）时视为内容异常，可按次数重试或改写提示词。'
+                ),
+            contentRetries: Schema.number()
+                .min(0)
+                .max(5)
+                .step(1)
+                .default(0)
+                .description(
+                    '内容异常时在同一接口重试的次数。每次重试都可能重新计费；默认 0 不重试。'
+                ),
+            promptRewrite: Schema.boolean()
+                .default(false)
+                .description(
+                    '最终错误属于内容异常时，调用文本模型改写提示词后再请求一次生图。需要配置内容异常关键词。'
+                ),
+            fallbackToUrl: Schema.boolean()
+                .default(false)
+                .description(
+                    '生图成功但插件无法下载图片（例如地址不是公网 HTTPS）时，把接口返回的图片地址直接交给聊天平台发送，由平台自行下载。仅在信任生图服务时开启。'
                 )
         }).description('漫画设置')
     }).description('模型接口与漫画'),

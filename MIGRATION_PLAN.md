@@ -1,5 +1,25 @@
 # 配置与数据库迁移
 
+## 漫画上游能力迁移
+
+本次从上游 AstrBot 插件 astrbot_plugin_qq_group_daily_analysis（https://github.com/SXP-Simon/astrbot_plugin_qq_group_daily_analysis ，MIT 许可）迁移漫画生成流程，实现按本项目风格重写。
+
+新增配置键与默认值：
+
+- `comic.generationMode`：`'storyboard'`（默认，文本分镜后生图，仅群漫画）或 `'direct'`（旧版兼容，报告图直接生图）；用户画像漫画始终 direct。
+- `comic.characterProfiles`（默认 `[]`）：主持角色方案数组，每项含 `profileName`（`''`）、`enabled`（`true`）、`persona`（`''`）、`referenceFiles`（`[]`，最多取前 6 张）。
+- `comic.characterSelection`：`'first'`（默认）或 `'daily'`（每天随机，记录在 `data/chatluna/group_analysis/comic-character.json`）。
+- `comic.fallbackProviders`（默认 `[]`）：备用生图接口，每项含 `enabled`/`format`/`baseUrl`/`apiKey`/`model`，主接口失败后按顺序尝试。
+- `comic.networkRetries`（`0`）、`comic.retryDelaySeconds`（`2`）：网络类错误重试与间隔；超时不重试。
+- `comic.contentRetryKeywords`（`[]`）、`comic.contentRetries`（`0`）、`comic.promptRewrite`（`false`）：内容异常关键词、同接口重试次数与失败后文本改写。
+- `comic.fallbackToUrl`（`false`）：图片下载失败时把返回地址直接交给平台发送。
+
+生图格式仍仅支持 `openai` 和 `google`；上游的部分服务商协议（`openai-chat`、`xai`、`doubao`、`dashscope`）未纳入本项目。升级后群漫画默认从报告图直接生图切换为文本分镜后生图，如需保留旧行为请显式设置 `comic.generationMode = 'direct'`。
+
+本版同时移除了群文件/群相册归档功能：`uploadGroupFile`、`uploadGroupAlbum`、`groupUploadTransport`、`groupAlbumName`、`comic.uploadAlbum`、`comic.albumName` 不再读取，旧配置可删除。
+
+旧键 `comic.characters`、`comic.referenceImages`、`comic.randomCharacterDaily`、`comic.characterDescription` 仍不读取，可直接移除；需要多角色或多参考图时请改用 `comic.characterProfiles`。无需数据库迁移。
+
 ## 每群漫画开关
 
 - 在“监听群组”表新增 `comicEnabled`（启用群漫画），默认 `true`；缺少字段的旧配置及没有对应列表项的群延续原有行为。

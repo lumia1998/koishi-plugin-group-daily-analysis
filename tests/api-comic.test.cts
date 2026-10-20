@@ -62,6 +62,11 @@ const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=',
     'base64'
 )
+// A distinct provider result: the comic pipeline rejects an echoed reference.
+const generatedPng = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNQOlrxHwAEywJfL/28jwAAAABJRU5ErkJggg==',
+    'base64'
+)
 const base = 'https://provider.example'
 const json = (data: unknown) =>
     new Response(JSON.stringify(data), {
@@ -528,7 +533,12 @@ test('text analysis and replies ignore saved presets in every provider format', 
 test('comic pipeline uses the group report image and enforces cooldown and group guards', async (t) => {
     const config = Config({
         enableAllGroupsByDefault: true,
-        comic: { enabled: true, baseUrl: base, model: 'image-model' }
+        comic: {
+            enabled: true,
+            generationMode: 'direct',
+            baseUrl: base,
+            model: 'image-model'
+        }
     })
     let action: any
     let calls = 0
@@ -621,7 +631,11 @@ test('comic pipeline uses the group report image and enforces cooldown and group
                 {
                     content: {
                         parts: [
-                            { inlineData: { data: png.toString('base64') } }
+                            {
+                                inlineData: {
+                                    data: generatedPng.toString('base64')
+                                }
+                            }
                         ]
                     }
                 }
@@ -684,7 +698,11 @@ test('comic pipeline uses the group report image and enforces cooldown and group
                 {
                     content: {
                         parts: [
-                            { inlineData: { data: png.toString('base64') } }
+                            {
+                                inlineData: {
+                                    data: generatedPng.toString('base64')
+                                }
+                            }
                         ]
                     }
                 }

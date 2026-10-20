@@ -13,6 +13,11 @@ const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMwXnX3PwAFiAK6ob9qqgAAAABJRU5ErkJggg==',
     'base64'
 )
+// The comic flow rejects provider output identical to a reference image.
+const generatedPng = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNQOlrxHwAEywJfL/28jwAAAABJRU5ErkJggg==',
+    'base64'
+)
 const upstreamError =
     'Post "https://chatgpt.com/backend-api/codex/images/edits": EOF'
 
@@ -22,6 +27,7 @@ test('comic provider works over real local HTTP and does not retry failed edits'
         images: { field: string; name: string; data: Buffer }[]
     }[] = []
     let fail = false
+    let responseImage = png
     const server = createServer(async (request, response) => {
         try {
             assert.equal(request.method, 'POST')
@@ -77,7 +83,7 @@ test('comic provider works over real local HTTP and does not retry failed edits'
             } else {
                 response.end(
                     JSON.stringify({
-                        data: [{ b64_json: png.toString('base64') }]
+                        data: [{ b64_json: responseImage.toString('base64') }]
                     })
                 )
             }
@@ -94,6 +100,7 @@ test('comic provider works over real local HTTP and does not retry failed edits'
         minMessages: 1,
         comic: {
             enabled: true,
+            generationMode: 'direct',
             format: 'openai',
             baseUrl,
             apiKey: 'local-test-key',
@@ -197,6 +204,7 @@ test('comic provider works over real local HTTP and does not retry failed edits'
                 'character-reference.png'
             )
             await writeFile(config.comic.referenceImage, png)
+            responseImage = generatedPng
             let action: Function
             const sent: any[] = []
             const ctx = {
@@ -260,7 +268,7 @@ test('comic provider works over real local HTTP and does not retry failed edits'
                 sent[1].attrs.src.split(',')[1],
                 'base64'
             )
-            assert.deepEqual(output, png)
+            assert.deepEqual(output, generatedPng)
             await writeFile(
                 resolve(artifactDir, 'received-provider-image.png'),
                 output

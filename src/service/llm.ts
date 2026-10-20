@@ -25,6 +25,11 @@ import {
     promptUserPersona,
     promptUserTitles
 } from '../analysis-prompts'
+import {
+    buildComicRewritePrompt,
+    buildComicStoryboardPrompt,
+    parseComicStoryboard
+} from '../comic-storyboard'
 
 const MAX_TOPICS = 5
 const MAX_USER_TITLES = 6
@@ -457,6 +462,72 @@ export class LLMService extends Service {
             .replace('{analysisResult}', promptContext.analysisResult || '')
 
         return this._callText(prompt, '群分析对话回复', undefined)
+    }
+
+    public async generateComicStoryboard(
+        topics: SummaryTopic[],
+        persona?: string,
+        signal?: AbortSignal
+    ): Promise<string> {
+        const prompt = buildComicStoryboardPrompt(topics, persona)
+        const attempts = Math.max(0, this.config.llm.retryCount ?? 2)
+        for (let attempt = 0; ; attempt++) {
+            const text = await this.generateText(prompt, undefined, signal)
+            try {
+                return parseComicStoryboard(text)
+            } catch (error) {
+                if (attempt >= attempts || signal?.aborted) throw error
+                const delay =
+                    Math.max(0, this.config.llm.retryBackoffSeconds ?? 1) *
+                    1000 *
+                    Math.pow(2, attempt)
+                if (delay)
+                    await new Promise((resolve) => setTimeout(resolve, delay))
+            }
+        }
+    }
+
+    public async rewriteComicPrompt(
+        prompt: string,
+        lastError: string,
+        signal?: AbortSignal
+    ): Promise<string | undefined> {
+        try {
+            const text = await this.generateText(
+                buildComicRewritePrompt(prompt, lastError),
+                undefined,
+                signal
+            )
+            const fenced = text.match(
+                /\x60\x60\x60(?:json)?\s*([\s\S]*?)\x60\x60\x60/i
+            )
+            let data: unknown
+            try {
+                data = JSON.parse(fenced ? fenced[1] : text)
+            } catch {
+                const match = text.match(/\{[\s\S]*\}/)
+                if (match) {
+                    try {
+                        data = JSON.parse(match[0])
+                    } catch {
+                        data = undefined
+                    }
+                }
+            }
+            const candidate = data as
+                | { can_fix?: unknown; new_prompt?: unknown }
+                | undefined
+            if (
+                candidate?.can_fix === true &&
+                typeof candidate.new_prompt === 'string' &&
+                candidate.new_prompt.trim()
+            )
+                return candidate.new_prompt.trim()
+            return undefined
+        } catch (error) {
+            this.ctx.logger.warn('改写漫画提示词失败。', error)
+            return undefined
+        }
     }
 }
 

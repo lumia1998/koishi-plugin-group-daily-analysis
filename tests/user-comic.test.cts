@@ -10,6 +10,12 @@ import { buildUserComicImagePrompt } from '../src/user-comic-prompts'
 import { getUserComicVisualSpec } from '../src/skins/user-comic'
 import { persona } from './theme-fixtures.cts'
 
+// The comic flow rejects provider output identical to a reference image.
+const generatedPng = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNQOlrxHwAEywJfL/28jwAAAABJRU5ErkJggg==',
+    'base64'
+)
+
 test('user comic image prompt keeps the report dimensions and theme direction', () => {
     const imagePrompt = buildUserComicImagePrompt(true, true, 'BlueArchive')
     assert.match(imagePrompt, /附件 1 是用户画像报告/)
@@ -112,6 +118,7 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
         comic: {
             enabled: true,
             userEnabled: true,
+            generationMode: 'direct',
             baseUrl: 'https://example.test',
             model: 'image',
             format: 'google'
@@ -233,7 +240,9 @@ test('user comic reads saved profile, shares provider/cooldown and respects pers
                 candidates: [
                     {
                         content: {
-                            parts: [{ inlineData: { data: 'iVBORw0KGgo=' } }]
+                            parts: [
+                { inlineData: { data: generatedPng.toString('base64') } }
+            ]
                         }
                     }
                 ]

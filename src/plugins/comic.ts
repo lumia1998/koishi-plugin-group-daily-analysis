@@ -17,7 +17,14 @@ import {
     matchesGroupList,
     shouldListenToMessage
 } from '../utils'
-import { generateImage, imageMime, loadReference } from '../service/image'
+import { imageMime } from '../service/image'
+import { ComicImageError, generateComicImage } from '../service/comic-image'
+import {
+    comicCharacterStatePath,
+    loadComicReferences,
+    selectComicCharacter
+} from '../comic-characters'
+import { buildStoryboardImagePrompt } from '../comic-storyboard'
 import { createTrace, errorDetail, errorKind } from '../diagnostics'
 import { buildGroupComicImagePrompt } from '../comic-prompts'
 import { ConcurrencyLimiter } from '../service/limiter'
@@ -163,13 +170,18 @@ export function apply(ctx: Context, config: Config) {
         trace('任务开始', { group: key })
         running.set(key, controller)
         try {
-            const primaryReference = await loadReference(
+            const character = selectComicCharacter(
+                config.comic.characterProfiles,
+                config.comic.characterSelection,
+                comicCharacterStatePath(ctx.baseDir)
+            )
+            const characterReferences = await loadComicReferences(
+                character,
                 config.comic.referenceImage,
                 ctx.baseDir
             )
-            const characterReferences = primaryReference
-                ? [primaryReference]
-                : []
+            const storyboard =
+                !profile && config.comic.generationMode === 'storyboard'
             let reportReference: Buffer | undefined
             if (profile) {
                 stage = '渲染画像参考图'
@@ -184,7 +196,7 @@ export function apply(ctx: Context, config: Config) {
                     )
                 if (Buffer.isBuffer(report)) reportReference = report
                 else throw new Error(`用户画像报告参考图生成失败：${report}`)
-            } else if (analysisResult) {
+            } else if (!storyboard && analysisResult) {
                 stage = '渲染群分析参考图'
                 const report =
                     await ctx.chatluna_group_analysis_renderer.renderGroupAnalysis(
@@ -246,7 +258,7 @@ export function apply(ctx: Context, config: Config) {
                 (!Array.isArray(resolvedTopics) || !resolvedTopics.length)
             )
                 return '未提取到有效话题。'
-            if (!profile && !reportReference) {
+            if (!profile && !storyboard && !reportReference) {
                 stage = '渲染群分析参考图'
                 const groupTopics = resolvedTopics || []
                 const report =
@@ -262,9 +274,11 @@ export function apply(ctx: Context, config: Config) {
                 if (Buffer.isBuffer(report)) reportReference = report
                 else throw new Error(`群分析报告参考图生成失败：${report}`)
             }
-            const comicReferences = reportReference
-                ? [reportReference, ...characterReferences]
-                : characterReferences
+            const comicReferences = storyboard
+                ? characterReferences
+                : reportReference
+                  ? [reportReference, ...characterReferences]
+                  : characterReferences
             const groupTopics = resolvedTopics || []
             trace('参考图读取完成', {
                 bytes: comicReferences.reduce(
@@ -284,37 +298,74 @@ export function apply(ctx: Context, config: Config) {
             if (profile) {
                 imagePrompt = buildUserComicImagePrompt(
                     !!reportReference,
-                    characterReferences.length > 0,
-                    config.skin
+                    characterReferences.length,
+                    config.skin,
+                    character
                 )
                 trace('用户画像漫画图片提示准备完成', {
                     promptChars: imagePrompt.length,
-                    directImageFlow: true
+                    mode: 'direct',
+                    character: character?.name
+                })
+            } else if (storyboard) {
+                stage = '生成分镜'
+                const scene =
+                    await ctx.chatluna_group_analysis_llm.generateComicStoryboard(
+                        groupTopics,
+                        character?.persona,
+                        controller.signal
+                    )
+                trace('分镜生成完成', {
+                    topics: groupTopics.length,
+                    sceneChars: scene.length,
+                    hasPersona: !!character?.persona
+                })
+                if (controller.signal.aborted) return
+                imagePrompt = buildStoryboardImagePrompt(
+                    scene,
+                    characterReferences.length
+                )
+                trace('群漫画图片提示准备完成', {
+                    promptChars: imagePrompt.length,
+                    mode: 'storyboard',
+                    character: character?.name
                 })
             } else {
                 imagePrompt = buildGroupComicImagePrompt(
                     !!reportReference,
-                    characterReferences.length > 0,
+                    characterReferences.length,
                     groupTopics.length,
-                    config.skin
+                    config.skin,
+                    character
                 )
                 trace('群漫画图片提示准备完成', {
                     promptChars: imagePrompt.length,
-                    directImageFlow: true
+                    mode: 'direct',
+                    character: character?.name
                 })
             }
             if (controller.signal.aborted) return
             lastRun.set(key, Date.now())
             stage = '调用生图 API'
             const image = await imageLimiter.run(() =>
-                generateImage(
-                    config.comic,
-                    imagePrompt,
-                    comicReferences,
-                    controller.signal,
+                generateComicImage(config.comic, imagePrompt, comicReferences, {
+                    signal: controller.signal,
                     trace,
-                    profile ? getUserComicImageOptions(config.skin) : undefined
-                )
+                    aspectRatio: profile
+                        ? getUserComicImageOptions(config.skin).aspectRatio
+                        : config.comic.aspectRatio,
+                    referenceRoles: storyboard
+                        ? comicReferences.map(() => 'character')
+                        : undefined,
+                    rewrite: config.comic.promptRewrite
+                        ? (prompt, lastError) =>
+                              ctx.chatluna_group_analysis_llm.rewriteComicPrompt(
+                                  prompt,
+                                  lastError,
+                                  controller.signal
+                              )
+                        : undefined
+                })
             )
             stage = '发送漫画'
             if (!controller.signal.aborted) {
@@ -344,7 +395,10 @@ export function apply(ctx: Context, config: Config) {
         } catch (error) {
             const detail = errorDetail(error, [
                 config.comic.apiKey,
-                config.llm?.apiKey
+                config.llm?.apiKey,
+                ...(config.comic.fallbackProviders ?? []).map(
+                    (provider) => provider.apiKey
+                )
             ])
             trace('任务失败', {
                 stage,
@@ -352,10 +406,46 @@ export function apply(ctx: Context, config: Config) {
                 detail,
                 cancelled: controller.signal.aborted
             })
-            if (!controller.signal.aborted)
+            if (!controller.signal.aborted) {
+                if (
+                    error instanceof ComicImageError &&
+                    config.comic.fallbackToUrl &&
+                    error.fallbackUrl
+                ) {
+                    try {
+                        const receipts = await session.send(
+                            h.image(error.fallbackUrl)
+                        )
+                        const messageIds = Array.isArray(receipts)
+                            ? receipts.filter(
+                                  (id): id is string =>
+                                      !!id &&
+                                      id !== 'undefined' &&
+                                      id !== 'null'
+                              )
+                            : []
+                        if (!Array.isArray(receipts) || messageIds.length) {
+                            trace('图片地址发送完成', {
+                                receiptCount: Array.isArray(receipts)
+                                    ? receipts.length
+                                    : undefined
+                            })
+                            return
+                        }
+                    } catch (sendError) {
+                        trace('图片地址发送失败', {
+                            reason: errorKind(sendError)
+                        })
+                    }
+                }
+                const attempts =
+                    error instanceof ComicImageError && error.attempts > 1
+                        ? `已按配置尝试 ${error.attempts} 次生图请求，不会再自动重试。`
+                        : '不会自动重复付费生图。'
                 return h.text(
-                    `${profile ? '用户画像漫画' : '群漫画'}失败（${stage}）：${detail}\n不会自动重复付费生图。`
+                    `${profile ? '用户画像漫画' : '群漫画'}失败（${stage}）：${detail}\n${attempts}`
                 )
+            }
         } finally {
             trace('任务结束', { stage, elapsedMs: Date.now() - started })
             running.delete(key)
