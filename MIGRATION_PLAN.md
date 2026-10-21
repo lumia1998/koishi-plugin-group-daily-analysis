@@ -1,5 +1,16 @@
 # 配置与数据库迁移
 
+## 当前配置精简
+
+- 群分析、定时任务和漫画统一使用 `listenerGroups`，保留 `enableAllGroupsByDefault` 与每行 `comicEnabled`。`autoAnalysisGroupMode`、`autoAnalysisGroups`、`comic.groupMode`、`comic.groups` 不再读取。
+- 导航只保留同级的“文本模型接口”和“漫画设置”；生成随机度合入文本模型接口，保存路径仍为顶层 `temperature`，`llm` 和 `comic` 接口配置路径不变。
+- 群漫画固定使用文本分镜，用户画像漫画仍根据画像报告图直接生图。`comic.generationMode` 不再读取。
+- 角色只保留单张 `comic.referenceImage`。`comic.characterProfiles`、`comic.characterSelection` 不再读取，也不再读写每日角色选择文件。旧方案中的图片需要自行选择一张填入角色参考图。
+- 移除备用接口、内容重试、提示词改写与地址回退：`comic.fallbackProviders`、`comic.contentRetryKeywords`、`comic.contentRetries`、`comic.promptRewrite`、`comic.fallbackToUrl` 不再读取。
+- 重试为内部默认行为：文本请求最多重试 2 次，退避 1 秒、2 秒；生图临时网络故障最多重试 2 次，退避 2 秒、4 秒，超时、取消、内容错误或下载失败直接结束。生图重试可能单独计费。
+- `llm.retryCount`、`llm.retryBackoffSeconds`、`comic.networkRetries`、`comic.retryDelaySeconds` 不再读取，旧值可删除。
+- 本次不涉及数据库迁移。以下章节记录此前版本变更；与本节冲突时以本节为准。
+
 ## 漫画上游能力迁移
 
 本次从上游 AstrBot 插件 astrbot_plugin_qq_group_daily_analysis（https://github.com/SXP-Simon/astrbot_plugin_qq_group_daily_analysis ，MIT 许可）迁移漫画生成流程，实现按本项目风格重写。

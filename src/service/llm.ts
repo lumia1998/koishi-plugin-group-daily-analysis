@@ -26,13 +26,14 @@ import {
     promptUserTitles
 } from '../analysis-prompts'
 import {
-    buildComicRewritePrompt,
     buildComicStoryboardPrompt,
     parseComicStoryboard
 } from '../comic-storyboard'
 
 const MAX_TOPICS = 5
 const MAX_USER_TITLES = 6
+const TEXT_RETRIES = 2
+const RETRY_BACKOFF_SECONDS = 1
 
 export class LLMService extends Service {
     private usageScope = new AsyncLocalStorage<{
@@ -72,8 +73,6 @@ export class LLMService extends Service {
             model,
             inputChars: prompt.length
         })
-        const retries = Math.max(0, Number(api.retryCount ?? 2))
-        const backoff = Math.max(0, Number(api.retryBackoffSeconds ?? 1))
         let text = ''
         const limiter =
             this.limiter ||
@@ -82,7 +81,7 @@ export class LLMService extends Service {
             ))
         await limiter.run(async () => {
             let lastError: unknown
-            for (let attempt = 0; attempt <= retries; attempt += 1) {
+            for (let attempt = 0; attempt <= TEXT_RETRIES; attempt += 1) {
                 try {
                     const response = await requestJson(
                         request.url,
@@ -130,8 +129,9 @@ export class LLMService extends Service {
                     return
                 } catch (error) {
                     lastError = error
-                    if (signal?.aborted || attempt >= retries) break
-                    const delay = backoff * 1000 * Math.pow(2, attempt)
+                    if (signal?.aborted || attempt >= TEXT_RETRIES) break
+                    const delay =
+                        RETRY_BACKOFF_SECONDS * 1000 * Math.pow(2, attempt)
                     if (delay > 0)
                         await new Promise((resolve) =>
                             setTimeout(resolve, delay)
@@ -169,7 +169,6 @@ export class LLMService extends Service {
         modelName?: string,
         signal?: AbortSignal
     ): Promise<T> {
-        const attempts = Math.max(0, this.config.llm.retryCount ?? 2)
         for (let attempt = 0; ; attempt++) {
             const text = await this.generateText(prompt, modelName, signal)
             const fenced = text.match(
@@ -179,11 +178,9 @@ export class LLMService extends Service {
                 const data = load(fenced ? fenced[1] : text)
                 return validateAnalysisOutput(taskName, data) as T
             } catch (error) {
-                if (attempt >= attempts || signal?.aborted) throw error
+                if (attempt >= TEXT_RETRIES || signal?.aborted) throw error
                 const delay =
-                    Math.max(0, this.config.llm.retryBackoffSeconds ?? 1) *
-                    1000 *
-                    Math.pow(2, attempt)
+                    RETRY_BACKOFF_SECONDS * 1000 * Math.pow(2, attempt)
                 if (delay)
                     await new Promise((resolve) => setTimeout(resolve, delay))
             }
@@ -466,67 +463,21 @@ export class LLMService extends Service {
 
     public async generateComicStoryboard(
         topics: SummaryTopic[],
-        persona?: string,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        hasCharacterReference = false
     ): Promise<string> {
-        const prompt = buildComicStoryboardPrompt(topics, persona)
-        const attempts = Math.max(0, this.config.llm.retryCount ?? 2)
+        const prompt = buildComicStoryboardPrompt(topics, hasCharacterReference)
         for (let attempt = 0; ; attempt++) {
             const text = await this.generateText(prompt, undefined, signal)
             try {
                 return parseComicStoryboard(text)
             } catch (error) {
-                if (attempt >= attempts || signal?.aborted) throw error
+                if (attempt >= TEXT_RETRIES || signal?.aborted) throw error
                 const delay =
-                    Math.max(0, this.config.llm.retryBackoffSeconds ?? 1) *
-                    1000 *
-                    Math.pow(2, attempt)
+                    RETRY_BACKOFF_SECONDS * 1000 * Math.pow(2, attempt)
                 if (delay)
                     await new Promise((resolve) => setTimeout(resolve, delay))
             }
-        }
-    }
-
-    public async rewriteComicPrompt(
-        prompt: string,
-        lastError: string,
-        signal?: AbortSignal
-    ): Promise<string | undefined> {
-        try {
-            const text = await this.generateText(
-                buildComicRewritePrompt(prompt, lastError),
-                undefined,
-                signal
-            )
-            const fenced = text.match(
-                /\x60\x60\x60(?:json)?\s*([\s\S]*?)\x60\x60\x60/i
-            )
-            let data: unknown
-            try {
-                data = JSON.parse(fenced ? fenced[1] : text)
-            } catch {
-                const match = text.match(/\{[\s\S]*\}/)
-                if (match) {
-                    try {
-                        data = JSON.parse(match[0])
-                    } catch {
-                        data = undefined
-                    }
-                }
-            }
-            const candidate = data as
-                | { can_fix?: unknown; new_prompt?: unknown }
-                | undefined
-            if (
-                candidate?.can_fix === true &&
-                typeof candidate.new_prompt === 'string' &&
-                candidate.new_prompt.trim()
-            )
-                return candidate.new_prompt.trim()
-            return undefined
-        } catch (error) {
-            this.ctx.logger.warn('改写漫画提示词失败。', error)
-            return undefined
         }
     }
 }

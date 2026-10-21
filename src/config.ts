@@ -10,24 +10,7 @@ export interface GroupListener {
     comicEnabled?: boolean
 }
 
-export type GroupListMode = 'inherit' | 'whitelist' | 'blacklist'
-
 export type ComicImageFormat = 'openai' | 'google'
-
-export interface ComicCharacterProfile {
-    profileName: string
-    enabled: boolean
-    persona: string
-    referenceFiles: string[]
-}
-
-export interface ComicFallbackProvider {
-    enabled: boolean
-    format: ComicImageFormat
-    baseUrl: string
-    apiKey: string
-    model: string
-}
 
 const GroupListener: Schema<GroupListener> = Schema.object({
     platform: Schema.string().required().description('平台名称'),
@@ -44,68 +27,23 @@ const comicImageFormat = () =>
         Schema.const('google').description('Google Gemini')
     ])
 
-const ComicCharacterProfile: Schema<ComicCharacterProfile> = Schema.object({
-    profileName: Schema.string()
-        .default('')
-        .description('方案名称，用于日志和每日随机记录。'),
-    enabled: Schema.boolean().default(true).description('是否参与角色选择。'),
-    persona: Schema.string()
-        .role('textarea')
-        .default('')
-        .description(
-            '角色设定：外观、性格和说话口吻。直接生图时附加到漫画提示词；分镜模式下作为分镜模型的角色人格。'
-        ),
-    referenceFiles: Schema.array(Schema.path({ filters: ['file'] }))
-        .default([])
-        .description(
-            '该角色的参考图（PNG、JPEG 或 WebP，单张最大 20MB），按顺序发送；留空时使用主要角色参考图。'
-        )
-})
-
-const ComicFallbackProvider: Schema<ComicFallbackProvider> = Schema.object({
-    enabled: Schema.boolean().default(true).description('是否启用此备用接口。'),
-    format: comicImageFormat().default('openai').description('生图接口类型。'),
-    baseUrl: Schema.string()
-        .default('')
-        .description('生图接口基础地址，支持带版本的地址或完整接口地址。'),
-    apiKey: Schema.string()
-        .role('secret')
-        .default('')
-        .description('生图接口密钥。'),
-    model: Schema.string().default('').description('模型 ID。')
-})
-
 export interface Config {
     llm: ApiConfig
     comic: {
         enabled: boolean
         userEnabled: boolean
         autoSend: boolean
-        groupMode: GroupListMode
-        groups: string[]
-        generationMode: 'direct' | 'storyboard'
         format: ComicImageFormat
         baseUrl: string
         apiKey: string
         model: string
         referenceImage: string
-        characterProfiles: ComicCharacterProfile[]
-        characterSelection: 'first' | 'daily'
         timeout: number
         cooldown: number
         aspectRatio: string
-        fallbackProviders: ComicFallbackProvider[]
-        networkRetries: number
-        retryDelaySeconds: number
-        contentRetryKeywords: string[]
-        contentRetries: number
-        promptRewrite: boolean
-        fallbackToUrl: boolean
     }
     enableAllGroupsByDefault: boolean
     listenerGroups: GroupListener[]
-    autoAnalysisGroupMode: GroupListMode
-    autoAnalysisGroups: string[]
     alwaysPersistMessages: boolean
     retentionDays: number
     outputFormat: 'image' | 'pdf' | 'text' | 'html'
@@ -148,22 +86,9 @@ export const Config: Schema<Config> = Schema.intersect([
         listenerGroups: Schema.array(GroupListener)
             .role('table')
             .description(
-                '数据库监听规则列表。每行可独立关闭群漫画，不影响普通群日报和用户画像漫画。'
+                '群分析、定时任务和漫画共用的群组列表。每行可独立关闭群漫画。'
             )
             .default([]),
-        autoAnalysisGroupMode: Schema.union([
-            Schema.const('inherit').description('继承基础监听群组'),
-            Schema.const('whitelist').description('仅分析列表中的群组'),
-            Schema.const('blacklist').description('排除列表中的群组')
-        ])
-            .default('inherit')
-            .description(
-                '定时分析目标与消息监听分开配置；inherit 保持现有监听群组行为。'
-            ),
-        autoAnalysisGroups: Schema.array(String)
-            .role('table')
-            .default([])
-            .description('定时分析群组 ID 列表；可填写群号或频道号。'),
         cronSchedule: Schema.string().description(
             '定时发送分析报告的 CRON 表达式。留空则禁用。例如 "0 22 * * *" 表示每天22点。'
         ),
@@ -289,9 +214,7 @@ export const Config: Schema<Config> = Schema.intersect([
             )
             .min(0)
             .max(2)
-            .default(1.5)
-    }).description('文本生成设置'),
-    Schema.object({
+            .default(1.5),
         llm: Schema.object({
             format: Schema.union([
                 Schema.const('openai').description('OpenAI Responses'),
@@ -312,16 +235,6 @@ export const Config: Schema<Config> = Schema.intersect([
                 .description(
                     '文本模型。接口不提供模型列表时可手动填写模型 ID。'
                 ),
-            retryCount: Schema.number()
-                .min(0)
-                .max(5)
-                .default(2)
-                .description('文本 API 失败后的重试次数。'),
-            retryBackoffSeconds: Schema.number()
-                .min(0)
-                .max(60)
-                .default(1)
-                .description('文本 API 重试退避秒数。'),
             timeout: Schema.number()
                 .min(1)
                 .max(600)
@@ -331,7 +244,9 @@ export const Config: Schema<Config> = Schema.intersect([
                 .min(1)
                 .default(32768)
                 .description('单次生成的最大长度（Token）。')
-        }).description('文本模型接口'),
+        })
+    }).description('文本模型接口'),
+    Schema.object({
         comic: Schema.object({
             enabled: Schema.boolean()
                 .default(false)
@@ -346,32 +261,9 @@ export const Config: Schema<Config> = Schema.intersect([
                 .description(
                     '手动、自然语言或定时群分析生成报告后，异步生成并发送群漫画。需要启用漫画功能。'
                 ),
-            groupMode: Schema.union([
-                Schema.const('inherit').description('继承分析群组权限'),
-                Schema.const('whitelist').description('仅允许列表中的群组'),
-                Schema.const('blacklist').description('排除列表中的群组')
-            ])
-                .default('inherit')
-                .description('漫画权限与定时分析权限独立。'),
-            groups: Schema.array(String)
-                .role('table')
-                .default([])
-                .description('漫画群组 ID 列表。'),
-            generationMode: Schema.union([
-                Schema.const('storyboard').description(
-                    '文本分镜后生图（默认）'
-                ),
-                Schema.const('direct').description('报告图直接生图（旧版兼容）')
-            ])
-                .default('storyboard')
-                .description(
-                    '群漫画生成方式。storyboard 先用文本模型把话题改写为逐格分镜画面提示词（额外消耗一次文本请求），再只附带角色参考图生图；direct 是旧版兼容模式，把渲染好的群分析报告图作为附件 1 直接生图。用户画像漫画始终直接生图。'
-                ),
             format: comicImageFormat()
                 .default('google')
-                .description(
-                    '生图接口类型。分镜模式只发送角色参考图；直接生图会同时发送报告图和角色参考图，请选择支持对应参考图数量的模型。'
-                ),
+                .description('生图接口类型，群漫画和用户画像漫画共用。'),
             baseUrl: Schema.string().description(
                 '生图接口基础地址。支持填写带版本的地址或完整接口地址；保存地址和密钥后会自动获取模型列表。'
             ),
@@ -385,21 +277,8 @@ export const Config: Schema<Config> = Schema.intersect([
                     '选择支持图片输出的模型。列表由生图服务提供，可能包含文本模型；请根据服务商说明选择，也可手动输入。'
                 ),
             referenceImage: Schema.path({ filters: ['file'] }).description(
-                '漫画主持角色参考图（PNG、JPEG 或 WebP，最大 20MB）。群漫画和用户画像漫画共用此图；选中的主持角色方案自带参考图时优先使用方案参考图；都留空时由生图模型设计统一角色。'
+                '角色参考图（PNG、JPEG 或 WebP，最大 20MB）。两种漫画共用；留空时由模型设计角色。'
             ),
-            characterProfiles: Schema.array(ComicCharacterProfile)
-                .default([])
-                .description(
-                    '主持角色方案。存在启用方案时按角色选择方式选出一个，群漫画和用户画像漫画都使用其角色设定和参考图；为空时使用主要角色参考图。'
-                ),
-            characterSelection: Schema.union([
-                Schema.const('first').description('固定使用第一个启用方案'),
-                Schema.const('daily').description('每天随机选择一个启用方案')
-            ])
-                .default('first')
-                .description(
-                    '每日随机会记录当天的选择，重启后保持不变；所选方案被禁用或删除后重新随机。'
-                ),
             timeout: Schema.number()
                 .min(1)
                 .max(600)
@@ -412,53 +291,9 @@ export const Config: Schema<Config> = Schema.intersect([
             aspectRatio: Schema.string()
                 .pattern(/^[1-9]\d*:[1-9]\d*$/)
                 .default('16:9')
-                .description(
-                    '群漫画宽高比（如 16:9），用户画像漫画使用 3:4。OpenAI Images 发送 aspect_ratio，Google 发送 imageConfig.aspectRatio；均不指定像素尺寸。'
-                ),
-            fallbackProviders: Schema.array(ComicFallbackProvider)
-                .default([])
-                .description(
-                    '备用生图接口。主接口失败后按列表顺序尝试，每次尝试都可能单独计费；共用超时和比例设置。默认不配置。'
-                ),
-            networkRetries: Schema.number()
-                .min(0)
-                .max(5)
-                .step(1)
-                .default(0)
-                .description(
-                    '同一接口遇到 HTTP 408/409/429/5xx 或连接失败时的重试次数。请求超时不会重试；每次重试都可能重新计费。默认 0 不重试。'
-                ),
-            retryDelaySeconds: Schema.number()
-                .min(0)
-                .max(60)
-                .default(2)
-                .description('生图重试前的等待秒数。'),
-            contentRetryKeywords: Schema.array(String)
-                .role('table')
-                .default([])
-                .description(
-                    '内容异常关键词。生图错误信息包含任一关键词（不区分大小写）时视为内容异常，可按次数重试或改写提示词。'
-                ),
-            contentRetries: Schema.number()
-                .min(0)
-                .max(5)
-                .step(1)
-                .default(0)
-                .description(
-                    '内容异常时在同一接口重试的次数。每次重试都可能重新计费；默认 0 不重试。'
-                ),
-            promptRewrite: Schema.boolean()
-                .default(false)
-                .description(
-                    '最终错误属于内容异常时，调用文本模型改写提示词后再请求一次生图。需要配置内容异常关键词。'
-                ),
-            fallbackToUrl: Schema.boolean()
-                .default(false)
-                .description(
-                    '生图成功但插件无法下载图片（例如地址不是公网 HTTPS）时，把接口返回的图片地址直接交给聊天平台发送，由平台自行下载。仅在信任生图服务时开启。'
-                )
-        }).description('漫画设置')
-    }).description('模型接口与漫画'),
+                .description('群漫画宽高比（如 16:9），用户画像漫画使用 3:4。')
+        })
+    }).description('漫画设置'),
     Schema.object({
         personaAnalysisMessageInterval: Schema.number()
             .description(

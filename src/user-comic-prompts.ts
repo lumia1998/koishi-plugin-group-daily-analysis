@@ -6,8 +6,7 @@ import {
 export function buildUserComicImagePrompt(
     hasReportReference: boolean,
     hasCharacterReference: boolean | number,
-    skin = 'md3',
-    character?: { name?: string; persona?: string }
+    skin = 'md3'
 ): string {
     const visual = getUserComicVisualSpec(skin)
     const characterCount =
@@ -25,11 +24,12 @@ export function buildUserComicImagePrompt(
         : characterCount > 0
           ? '当前没有成功生成用户画像报告截图；附件是主持角色的外观参考，不得把主持角色当成画像本人。'
           : '没有图片参考；设计统一的主持角色，并让被分析对象与主持角色保持明确区分。'
-    const personaRule = character?.persona?.trim()
-        ? `\n主持角色设定：${character.persona.trim()}。该设定只影响主持角色的外观取向、性格和点评口吻，不是画像事实。`
-        : ''
+    const identityRule =
+        characterCount > 0
+            ? '\n主持角色参考图是身份和外观的最高优先级依据，不是仅供借鉴的画风。若参考图是正侧背三视图，三个视角代表同一个人；逐格保留其脸型、发色发型、瞳色、体型、服装、帽子、饰品和耳朵、尾巴等特征，只改变动作、表情与视角。报告主题、画像内容或报告头像都不能覆盖主持角色的外观；不得为适应主题而换装、换发型或改变物种，也不得擅自增加眼镜、发饰等身份特征。不要把主持人换成其他人物，也不要照搬三视图的网格背景。\nCharacter identity lock: EVERY panel must use exactly the host from the character reference, with the original appearance and outfit. The report avatar and report theme must NEVER replace or redesign the host.'
+            : ''
     return `参考这些图片，直接生成一张竖版“角色主持的四维人物观察报告”。
-${referenceRoles}
+${referenceRoles}${identityRule}
 请根据图 1 顶部用户画像中的四个维度来创作：01 总体概览、02 性格特质、03 兴趣爱好、04 沟通风格。每个维度单独一个分镜，四个分镜组成一张像报告一样的完整页面，不要画成普通连续剧情四格。
 当前主题：${skin}（${visual.family}）。
 版式：${visual.layout}
@@ -38,7 +38,7 @@ ${referenceRoles}
 主持角色要在四个分镜中逐格观察、吐槽和讲解图 1 左上角头像人物的性格；吐槽友善、有趣，但必须以图 1 的实际内容为依据，不得编造画像事实。
 四格保持同一主持角色的脸、发型、服装、颜色和配饰。报告中的头像是被分析对象，配置的主要角色参考图是吐槽者。
 只需要输出最终图片，不要输出结构化数据、Markdown、分镜说明或幕后分析文字。图片内可以有清晰的中文标题、标签、对白和报告式短句，但不要塞入大段聊天记录、虚构链接、价格、战绩、设备参数或伪造原话。
-请保证四个维度都出现且各自独立成格，整体看起来像一份有角色吐槽的用户画像报告。${personaRule}`
+请保证四个维度都出现且各自独立成格，整体看起来像一份有角色吐槽的用户画像报告。`
 }
 
 export function getUserComicImageOptions(

@@ -21,7 +21,6 @@ import {
     generateTextReport,
     getAvatarUrl,
     getStartTimeByDays,
-    isAutoAnalysisGroup,
     isCacheExpiredByDays,
     isGroupComicEnabled,
     mergePersona,
@@ -1245,16 +1244,16 @@ export class AnalysisService extends Service {
     }
 
     private async resolveAutoAnalysisGroups() {
-        const configured = this.config.listenerGroups.filter((group) =>
-            isAutoAnalysisGroup(group, this.config)
+        const configured = this.config.listenerGroups.filter(
+            (group) => group.enabled
         )
         if (!this.config.enableAllGroupsByDefault) return configured
-        if (
-            this.config.autoAnalysisGroupMode === 'whitelist' &&
-            !this.config.autoAnalysisGroups.length
+        const discovered = new Map(
+            configured.map((group) => [
+                `${group.platform}:${group.selfId}:${group.channelId}`,
+                group
+            ])
         )
-            return []
-        const discovered: typeof configured = []
         for (const bot of this.ctx.bots) {
             const getGuildList = (bot as any).getGuildList
             if (typeof getGuildList !== 'function') continue
@@ -1265,13 +1264,15 @@ export class AnalysisService extends Service {
                     : response?.data || []
                 for (const guild of guilds) {
                     const id = String(guild.id)
-                    discovered.push({
-                        platform: bot.platform,
-                        selfId: bot.selfId,
-                        channelId: id,
-                        guildId: id,
-                        enabled: true
-                    })
+                    const key = `${bot.platform}:${bot.selfId}:${id}`
+                    if (!discovered.has(key))
+                        discovered.set(key, {
+                            platform: bot.platform,
+                            selfId: bot.selfId,
+                            channelId: id,
+                            guildId: id,
+                            enabled: true
+                        })
                 }
             } catch (error) {
                 this.ctx.logger.warn(
@@ -1280,9 +1281,7 @@ export class AnalysisService extends Service {
                 )
             }
         }
-        return discovered.filter((group) =>
-            isAutoAnalysisGroup(group, this.config)
-        )
+        return [...discovered.values()]
     }
 
     public async getUserPersona(

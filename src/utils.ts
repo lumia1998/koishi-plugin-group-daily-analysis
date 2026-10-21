@@ -8,7 +8,7 @@ import {
     UserPersonaProfile,
     UserStats
 } from './types'
-import { Config, GroupListener, GroupListMode } from './config'
+import { Config, GroupListener } from './config'
 import type { OneBotBot } from 'koishi-plugin-adapter-onebot'
 
 import { skinRegistry } from './skins'
@@ -97,28 +97,6 @@ export function calculateBasicStats(
     }
 
     return { userStats, totalChars, totalEmojiCount, allMessagesText }
-}
-
-export function matchesGroupList(
-    id: string | undefined,
-    mode: GroupListMode | undefined,
-    groups: string[] | undefined,
-    inherited: boolean
-): boolean {
-    if (inherited || !mode || mode === 'inherit') return true
-    const found = !!id && (groups || []).includes(id)
-    return mode === 'whitelist' ? found : !found
-}
-
-export function isAutoAnalysisGroup(
-    group: GroupListener,
-    config: Pick<Config, 'autoAnalysisGroupMode' | 'autoAnalysisGroups'>
-): boolean {
-    const id = group.guildId || group.channelId
-    if (!group.enabled) return false
-    const mode = config.autoAnalysisGroupMode || 'inherit'
-    if (mode === 'inherit') return true
-    return matchesGroupList(id, mode, config.autoAnalysisGroups, false)
 }
 
 export function buildPersonaRecordId(

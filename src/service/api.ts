@@ -9,8 +9,6 @@ export interface ApiConfig {
     model: string
     timeout: number
     maxOutputTokens: number
-    retryCount?: number
-    retryBackoffSeconds?: number
 }
 
 // Accept either a versioned API base or a full endpoint; never append /v1 twice.
